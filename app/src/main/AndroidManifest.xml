@@ -38,7 +38,8 @@
             android:name=".PlayerActivity"
             android:exported="false"
             android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/Theme.CyclingTV.Fullscreen" />
 
         <!-- DLNA 后台服务 -->
         <service
