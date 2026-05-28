@@ -61,7 +61,8 @@ class MainActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
 
         // 初始化 Cast
-        try { CastContext.getSharedInstance(this) } catch (_: Exception) {}
+        try { CastContext.getSharedInstance(this) } catch (_: Throwable) {}
+
 
         setupWebView()
         setupButtons()
@@ -317,10 +318,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
-        val castItem = menu.findItem(R.id.media_route_menu_item)
-        CastButtonFactory.setUpMediaRouteButton(applicationContext, menu, R.id.media_route_menu_item)
+        try {
+            CastButtonFactory.setUpMediaRouteButton(applicationContext, menu, R.id.media_route_menu_item)
+        } catch (_: Throwable) {
+            // 国内手机无 Google Play 服务，忽略
+        }
         return true
     }
+
 
     override fun onBackPressed() {
         if (binding.webView.canGoBack()) binding.webView.goBack()
