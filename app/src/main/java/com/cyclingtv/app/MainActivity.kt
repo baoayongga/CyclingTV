@@ -1,63 +1,34 @@
 package com.cyclingtv.app
 
 import android.annotation.SuppressLint
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
-import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
-import android.text.style.StyleSpan
-import android.view.Gravity
 import android.view.Menu
-import android.view.View
-import android.view.ViewGroup
 import android.webkit.*
-import android.widget.*
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.cyclingtv.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 主界面 v2 — 多源直播流抓取
- *
- * 功能：
- * - 内嵌 WebView 加载 cycling.today（广告已屏蔽）
- * - 点击「多源抓取」并发请求 6 个源
- * - 各源独立状态展示（成功/失败/空/抓取中）
- * - 发现流后可直接播放或投屏
+ * 主界面：内嵌 WebView 加载 cycling.today（屏蔽广告），
+ * 同时后台多源抓取直播流地址供投屏使用。
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    // 源状态
-    private val sourceStatuses = StreamExtractor.allSources.map {
-        StreamExtractor.SourceStatus(it)
-    }.toMutableList()
+    private val sourceResults = mutableListOf<StreamExtractor.StreamResult>()
+    private val foundStreams get() = sourceResults.flatMap { sr ->
+        sr.streamUrls.map { StreamInfo(it, sr.sourceName) }
+    }
 
-    // 已发现的流（WebView 拦截 + 后台抓取）
+    private val enabledSources = StreamExtractor.allSources.toMutableSet()
     private val webViewStreams = mutableListOf<StreamInfo>()
-
-    private val allFoundStreams: List<StreamInfo>
-        get() {
-            val list = webViewStreams.toMutableList()
-            sourceStatuses.filter { it.state == StreamExtractor.SourceStatus.State.SUCCESS }.forEach { st ->
-                // 这里需要缓存抓取结果
-            }
-            return list
-        }
-
-    // 缓存抓取结果（按源名索引）
-    private val scrapeCache = mutableMapOf<String, List<String>>()
 
     private val adHosts = setOf(
         "doubleclick.net", "googlesyndication.com", "adnxs.com",
@@ -68,6 +39,7 @@ class MainActivity : AppCompatActivity() {
         "lijit.com", "sovrn.com", "spotxchange.com", "springserve.com"
     )
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -78,14 +50,7 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
 
         binding.webView.loadUrl("https://cycling.today/")
-
-        // 启动后自动多源抓取
-        binding.webView.postDelayed({ fetchAllSources() }, 1500)
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // WebView
-    // ═══════════════════════════════════════════════════════════════════════════
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
@@ -97,17 +62,20 @@ class MainActivity : AppCompatActivity() {
         settings.userAgentString = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
 
         binding.webView.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse? {
+            override fun shouldInterceptRequest(
+                view: WebView?, request: WebResourceRequest
+            ): WebResourceResponse? {
                 val host = request.url.host ?: ""
                 if (adHosts.any { host.endsWith(it) }) {
                     return WebResourceResponse("text/plain", "utf-8", null)
                 }
                 val url = request.url.toString()
                 if (isStreamUrl(url)) {
+                    val info = StreamInfo(url, "WebView拦截")
                     runOnUiThread {
                         if (webViewStreams.none { it.url == url }) {
-                            webViewStreams.add(StreamInfo(url, "WebView拦截"))
-                            updateBadge()
+                            webViewStreams.add(info)
+                            updateStreamBadge()
                         }
                     }
                 }
@@ -116,17 +84,16 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // JS 提取流地址
-                view?.evaluateJavascript(JS_EXTRACT) { result ->
+                view?.evaluateJavascript(JS_EXTRACT_STREAMS) { result ->
                     if (result != null && result != "null" && result != "\"\"") {
                         val clean = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
                         clean.split("\n").filter { it.isNotBlank() }.forEach { u ->
-                            val trimmed = u.trim()
-                            if (webViewStreams.none { it.url == trimmed }) {
-                                webViewStreams.add(StreamInfo(trimmed, "JS提取"))
+                            val info = StreamInfo(u.trim(), "JS提取")
+                            if (webViewStreams.none { it.url == u.trim() }) {
+                                webViewStreams.add(info)
                             }
                         }
-                        updateBadge()
+                        updateStreamBadge()
                     }
                 }
                 binding.swipeRefresh.isRefreshing = false
@@ -137,213 +104,121 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 binding.progressBar.progress = newProgress
                 binding.progressBar.visibility =
-                    if (newProgress < 100) View.VISIBLE else View.GONE
+                    if (newProgress < 100) android.view.View.VISIBLE else android.view.View.GONE
             }
         }
 
         binding.swipeRefresh.setOnRefreshListener {
+            sourceResults.clear()
             webViewStreams.clear()
-            scrapeCache.clear()
-            sourceStatuses.forEach { it.state = StreamExtractor.SourceStatus.State.IDLE; it.streamCount = 0 }
-            updateBadge()
+            updateStreamBadge()
             binding.webView.reload()
-            fetchAllSources()
+            fetchStreamsInBackground()
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 按钮
-    // ═══════════════════════════════════════════════════════════════════════════
-
     private fun setupButtons() {
         binding.btnFetch.setOnClickListener {
+            sourceResults.clear()
             webViewStreams.clear()
-            scrapeCache.clear()
-            sourceStatuses.forEach { it.state = StreamExtractor.SourceStatus.State.IDLE; it.streamCount = 0 }
-            updateBadge()
-            fetchAllSources()
+            updateStreamBadge()
+            showSourcePicker()
         }
         binding.btnStreams.setOnClickListener { showStreamsDialog() }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 多源并发抓取
-    // ═══════════════════════════════════════════════════════════════════════════
+    private fun showSourcePicker() {
+        val sources = StreamExtractor.allSources
+        val names = sources.map { it.name }.toTypedArray()
+        val checked = BooleanArray(sources.size) { sources[it] in enabledSources }
+        AlertDialog.Builder(this)
+            .setTitle("选择抓取来源")
+            .setMultiChoiceItems(names, checked) { _, which, isChecked ->
+                val src = sources[which]
+                if (isChecked) enabledSources.add(src) else enabledSources.remove(src)
+            }
+            .setPositiveButton("开始抓取") { _, _ ->
+                if (enabledSources.isEmpty()) {
+                    Toast.makeText(this, "请至少选择一个来源", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                Toast.makeText(this, "正在多源抓取直播流...", Toast.LENGTH_SHORT).show()
+                fetchStreamsInBackground()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
 
-    private fun fetchAllSources() {
-        Toast.makeText(this, "正在多源抓取直播流…", Toast.LENGTH_SHORT).show()
-        binding.progressBar.visibility = View.VISIBLE
-        binding.progressBar.isIndeterminate = true
-
+    private fun fetchStreamsInBackground() {
+        binding.progressBar.visibility = android.view.View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
-            // 并发抓取所有源（async + awaitAll）
-            sourceStatuses.map { status ->
-                async {
-                    val urls = StreamExtractor.scrapeSource(status.source, status)
-                    if (urls.isNotEmpty()) {
-                        scrapeCache[status.source.name] = urls
-                    }
-                    withContext(Dispatchers.Main) { updateBadge() }
+            val tmpResults = mutableListOf<StreamExtractor.StreamResult>()
+            enabledSources.forEach { src ->
+                val urls = StreamExtractor.scrapeSource(src)
+                if (urls.isNotEmpty()) {
+                    tmpResults.add(StreamExtractor.StreamResult(src.name, urls.distinct()))
                 }
-            }.awaitAll()
-
+            }
             withContext(Dispatchers.Main) {
-                binding.progressBar.isIndeterminate = false
-                binding.progressBar.visibility = View.GONE
-
-                // 统计
-                val total = sourceStatuses.sumOf { it.streamCount }
-                val successCount = sourceStatuses.count { it.state == StreamExtractor.SourceStatus.State.SUCCESS }
-                val failCount = sourceStatuses.count { it.state == StreamExtractor.SourceStatus.State.ERROR }
-
-                if (total == 0) {
-                    buildSourceStatusDialog().show()
+                binding.progressBar.visibility = android.view.View.GONE
+                sourceResults.clear()
+                sourceResults.addAll(tmpResults)
+                val totalStreams = foundStreams.size
+                if (totalStreams == 0) {
+                    Toast.makeText(this@MainActivity, "当前未检测到直播流\n（比赛时段才会有，可尝试切换来源）", Toast.LENGTH_LONG).show()
                 } else {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "✓ $successCount 个源成功，共 $total 条流（$failCount 个失败）",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    // 自动弹流列表
-                    showStreamsDialog()
+                    Toast.makeText(this@MainActivity, "✓ 发现 $totalStreams 条流地址", Toast.LENGTH_LONG).show()
                 }
-
-                updateBadge()
+                updateStreamBadge()
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // UI 更新
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private fun updateBadge() {
-        val total = sourceStatuses.sumOf { it.streamCount } + webViewStreams.size
-        binding.btnStreams.text = if (total > 0) "📡 流列表 ($total)" else "📡 流列表"
-
-        // 更新源状态指示
-        val dotMap = mapOf(
-            StreamExtractor.SourceStatus.State.SUCCESS to "\uD83D\uDFE2",  // 🟢
-            StreamExtractor.SourceStatus.State.EMPTY   to "\uD83D\uDFE1",  // 🟡
-            StreamExtractor.SourceStatus.State.ERROR   to "\uD83D\uDD34",  // 🔴
-            StreamExtractor.SourceStatus.State.FETCHING to "\uD83D\uDD35",  // 🔵
-            StreamExtractor.SourceStatus.State.IDLE    to "⚪"
-        )
-
-        val statusText = sourceStatuses.joinToString("  ") { st ->
-            "${dotMap[st.state] ?: "⚪"}${st.source.name}"
-        }
-        binding.tvSourceStatus.text = statusText
+    private fun updateStreamBadge() {
+        val count = foundStreams.size
+        binding.btnStreams.text = if (count > 0) "流列表 ($count)" else "流列表"
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 流列表对话框
-    // ═══════════════════════════════════════════════════════════════════════════
-
     private fun showStreamsDialog() {
-        // 汇总所有流
-        val allStreams = mutableListOf<StreamInfo>()
-
-        // WebView 截获
+        val allStreams = foundStreams.toMutableList()
         webViewStreams.forEach { ws ->
             if (allStreams.none { it.url == ws.url }) allStreams.add(ws)
         }
-
-        // 各源抓取
-        scrapeCache.forEach { (sourceName, urls) ->
-            urls.forEach { url ->
-                if (allStreams.none { it.url == url }) {
-                    allStreams.add(StreamInfo(url, sourceName))
-                }
-            }
-        }
-
         if (allStreams.isEmpty()) {
-            buildSourceStatusDialog().show()
+            AlertDialog.Builder(this)
+                .setTitle("📡 直播流")
+                .setMessage("当前没有发现直播流。\n\n• 比赛时段请点击「抓取」按钮\n• 可尝试切换来源")
+                .setPositiveButton("去抓取") { _, _ -> showSourcePicker() }
+                .setNegativeButton("关闭", null).show()
             return
         }
-
-        // 分组适配器
-        val adapter = StreamAdapter(allStreams)
-
-        val listView = ListView(this).apply {
-            adapter = adapter
-            divider = null
-            dividerHeight = 0
-            setPadding(0, 8, 0, 8)
+        val listView = android.widget.ListView(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_2, android.R.id.text1,
+                allStreams.map { "${it.source} | ${truncate(it.url, 55)}" })
         }
-
-        AlertDialog.Builder(this, R.style.CyclingDialog)
+        AlertDialog.Builder(this)
             .setTitle("📡 共 ${allStreams.size} 条直播流")
             .setView(listView)
-            .setPositiveButton("重新抓取") { _, _ ->
-                webViewStreams.clear()
-                scrapeCache.clear()
-                sourceStatuses.forEach { it.state = StreamExtractor.SourceStatus.State.IDLE; it.streamCount = 0 }
-                updateBadge()
-                fetchAllSources()
-            }
-            .setNeutralButton("源状态") { _, _ -> buildSourceStatusDialog().show() }
-            .setNegativeButton("关闭", null)
+            .setPositiveButton("管理来源") { _, _ -> showSourcePicker() }
+            .setNegativeButton("关闭", null).setOnDismissListener { updateStreamBadge() }
             .create().also { d ->
                 listView.setOnItemClickListener { _, _, pos, _ ->
                     d.dismiss()
-                    showStreamActions(allStreams[pos])
+                    showStreamOptions(allStreams[pos])
                 }
                 d.show()
             }
     }
 
-    private fun buildSourceStatusDialog(): AlertDialog {
-        val sb = StringBuilder()
-        sourceStatuses.forEach { st ->
-            val icon = when (st.state) {
-                StreamExtractor.SourceStatus.State.SUCCESS  -> "\uD83D\uDFE2"
-                StreamExtractor.SourceStatus.State.EMPTY    -> "\uD83D\uDFE1"
-                StreamExtractor.SourceStatus.State.ERROR    -> "\uD83D\uDD34"
-                StreamExtractor.SourceStatus.State.FETCHING -> "\uD83D\uDD35"
-                StreamExtractor.SourceStatus.State.IDLE     -> "⚪"
-            }
-            val detail = when (st.state) {
-                StreamExtractor.SourceStatus.State.SUCCESS -> "${st.streamCount} 条流"
-                StreamExtractor.SourceStatus.State.EMPTY   -> st.errorMsg.ifBlank { "无直播信号" }
-                StreamExtractor.SourceStatus.State.ERROR   -> st.errorMsg.ifBlank { "抓取失败" }
-                else -> "..."
-            }
-            sb.append("$icon  ${st.source.name}\n      $detail\n\n")
-        }
-
-        return AlertDialog.Builder(this, R.style.CyclingDialog)
-            .setTitle("各源状态")
-            .setMessage(sb.toString().trim())
-            .setPositiveButton("重新抓取") { _, _ ->
-                webViewStreams.clear()
-                scrapeCache.clear()
-                sourceStatuses.forEach { it.state = StreamExtractor.SourceStatus.State.IDLE; it.streamCount = 0 }
-                updateBadge()
-                fetchAllSources()
-            }
-            .setNegativeButton("关闭", null)
-            .create()
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 流操作
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private fun showStreamActions(stream: StreamInfo) {
-        AlertDialog.Builder(this, R.style.CyclingDialog)
+    private fun showStreamOptions(stream: StreamInfo) {
+        AlertDialog.Builder(this)
             .setTitle("选择操作")
-            .setMessage("来源: ${stream.source}\n${truncateUrl(stream.url, 60)}")
-            .setItems(arrayOf("▶️  本机播放", "📺  投屏到电视", "📋  复制链接")) { _, idx ->
-                when (idx) {
+            .setMessage(truncate(stream.url, 80))
+            .setItems(arrayOf("▶️ 本机播放", "📺 投屏到电视", "📋 复制链接")) { _, which ->
+                when (which) {
                     0 -> openPlayer(stream.url, false)
                     1 -> openPlayer(stream.url, true)
-                    2 -> {
-                        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("stream_url", stream.url))
-                        Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
-                    }
+                    2 -> copyToClipboard(stream.url)
                 }
             }.show()
     }
@@ -355,19 +230,17 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 工具
-    // ═══════════════════════════════════════════════════════════════════════════
+    private fun copyToClipboard(text: String) {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("stream_url", text))
+        Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+    }
 
     private fun isStreamUrl(url: String) =
         url.contains(".m3u8") || url.contains(".mpd") || url.startsWith("rtmp") ||
         url.contains("/hls/") || url.contains("/live/") || url.contains("/stream/")
 
-    private fun truncateUrl(s: String, max: Int): String {
-        // 去掉 token 参数再截断
-        val clean = s.replace(Regex("[?&](s|e|token|key)=[^&]*"), "?***")
-        return if (clean.length <= max) clean else clean.take(max) + "..."
-    }
+    private fun truncate(s: String, max: Int) = if (s.length <= max) s else s.take(max) + "..."
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
@@ -378,46 +251,8 @@ class MainActivity : AppCompatActivity() {
         if (binding.webView.canGoBack()) binding.webView.goBack() else super.onBackPressed()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 内部类型
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * 流列表适配器 — 按来源分组显示
-     */
-    private inner class StreamAdapter(private val items: List<StreamInfo>) : BaseAdapter() {
-
-        override fun getCount() = items.size
-
-        override fun getItem(pos: Int) = items[pos]
-
-        override fun getItemId(pos: Int) = pos.toLong()
-
-        override fun getView(pos: Int, convertView: View?, parent: ViewGroup?): View {
-            val view = convertView ?: TextView(this@MainActivity).apply {
-                setPadding(48, 18, 48, 18)
-                setTextSize(13f)
-                setTextColor(Color.parseColor("#E0E0E0"))
-                setLineSpacing(4f, 1.2f)
-            }
-            val item = items[pos]
-            val display = "[${item.source}] ${truncateUrl(item.url, 50)}"
-
-            val ss = SpannableString(display)
-            // 来源名加粗 + 颜色
-            val srcStart = display.indexOf('[')
-            val srcEnd = display.indexOf(']') + 1
-            if (srcStart >= 0 && srcEnd > srcStart) {
-                ss.setSpan(StyleSpan(Typeface.BOLD), srcStart, srcEnd, 0)
-                ss.setSpan(ForegroundColorSpan(Color.parseColor("#E94560")), srcStart, srcEnd, 0)
-            }
-            (view as TextView).text = ss
-            return view
-        }
-    }
-
     companion object {
-        private const val JS_EXTRACT = """
+        private const val JS_EXTRACT_STREAMS = """
             (function() { var urls = [];
             document.querySelectorAll('video, video source, source').forEach(function(el) {
                 ['src','data-src','data-url'].forEach(function(a){
