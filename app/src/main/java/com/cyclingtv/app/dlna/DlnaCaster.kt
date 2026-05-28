@@ -238,7 +238,7 @@ object DlnaCaster {
             val xml = resp.body?.string() ?: return formats
 
             // 提取 Sink 协议信息
-            val sink = Regex("<Sink>(.*?)</Sink>", RegexOption.DOTALL).find(xml)
+            val sink = Regex("<Sink>(.*?)</Sink>", RegexOption.DOT_MATCHES_ALL).find(xml)
             if (sink != null) {
                 val protocols = sink.groupValues[1].split(",")
                 for (p in protocols) {
