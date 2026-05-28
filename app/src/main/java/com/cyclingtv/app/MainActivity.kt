@@ -192,22 +192,19 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton("关闭", null).show()
             return
         }
-        val listView = android.widget.ListView(this).apply {
-            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_2, android.R.id.text1,
-                allStreams.map { "${it.source} | ${truncate(it.url, 55)}" })
-        }
+        // 使用 setItems() 而非 setView(ListView)，避免 AlertDialog 内 ListView 点击不触发
+        val items = allStreams.mapIndexed { i, s ->
+            "${i + 1}. [${s.source}] ${truncate(s.url, 50)}"
+        }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("📡 共 ${allStreams.size} 条直播流")
-            .setView(listView)
-            .setPositiveButton("管理来源") { _, _ -> showSourcePicker() }
-            .setNegativeButton("关闭", null).setOnDismissListener { updateStreamBadge() }
-            .create().also { d ->
-                listView.setOnItemClickListener { _, _, pos, _ ->
-                    d.dismiss()
-                    showStreamOptions(allStreams[pos])
-                }
-                d.show()
+            .setItems(items) { _, pos ->
+                showStreamOptions(allStreams[pos])
             }
+            .setPositiveButton("管理来源") { _, _ -> showSourcePicker() }
+            .setNegativeButton("关闭", null)
+            .setOnDismissListener { updateStreamBadge() }
+            .show()
     }
 
     private fun showStreamOptions(stream: StreamInfo) {
