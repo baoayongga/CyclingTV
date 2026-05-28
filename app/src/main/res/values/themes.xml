@@ -13,6 +13,5 @@
     <style name="Theme.CyclingTV.NoActionBar" parent="Theme.CyclingTV">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="android:windowFullscreen">true</item>
     </style>
 </resources>
