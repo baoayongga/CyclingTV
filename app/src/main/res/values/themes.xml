@@ -1,0 +1,18 @@
+<resources>
+    <style name="Theme.CyclingTV" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">#1A1A2E</item>
+        <item name="colorPrimaryVariant">#16213E</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#E94560</item>
+        <item name="colorSecondaryVariant">#C73652</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:statusBarColor">#1A1A2E</item>
+        <item name="android:windowBackground">#0D0D0D</item>
+    </style>
+
+    <style name="Theme.CyclingTV.NoActionBar" parent="Theme.CyclingTV">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>
