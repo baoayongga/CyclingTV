@@ -110,17 +110,19 @@ class PlayerActivity : AppCompatActivity() {
     private fun castToDlnaDevice(controlUrl: String, ip: String) {
         Toast.makeText(this, "正在向 $ip 投屏...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
-            val success = DlnaCaster.castTo(controlUrl, streamUrl, "Cycling Today 直播")
+            val (success, errorMsg) = DlnaCaster.castTo(controlUrl, streamUrl, "Cycling Today 直播")
             withContext(Dispatchers.Main) {
                 if (success) {
                     Toast.makeText(this@PlayerActivity, "🎉 投屏成功！请在电视上查看", Toast.LENGTH_LONG).show()
                     exoPlayer?.pause()
                 } else {
+                    val detail = if (errorMsg.isNotBlank()) "\n\n错误详情：$errorMsg" else ""
                     AlertDialog.Builder(this@PlayerActivity)
                         .setTitle("投屏失败")
-                        .setMessage("无法连接到 $ip\n\n请检查：\n• 电视是否开启 DLNA\n• IP 地址是否正确")
-                        .setPositiveButton("重试") { _, _ -> inputIpAndCast() }
-                        .setNegativeButton("取消", null).show()
+                        .setMessage("无法向 $ip 投屏。$detail\n\n常见原因：\n• 电视 DLNA 不支持 HLS/m3u8 流（多数电视仅支持 MP4）\n• 电视与手机不在同一网段\n• 电视防火墙阻止了请求")
+                        .setPositiveButton("重试") { _, _ -> castToDlnaDevice(controlUrl, ip) }
+                        .setNegativeButton("本机播放") { _, _ -> binding.playerView.visibility = View.VISIBLE }
+                        .setNeutralButton("取消", null).show()
                 }
             }
         }
