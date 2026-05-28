@@ -1,6 +1,8 @@
 package com.cyclingtv.app
 
 import android.util.Base64
+import kotlin.text.Charsets
+import kotlin.text.RegexOption
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
