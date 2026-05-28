@@ -225,10 +225,12 @@ object StreamExtractor {
     /**
      * 从页面 HTML 中提取 _econfig 并解码
      * @param pageUrl 页面 URL (如 mindsleep.net/e/xxx)
+     * @param referer 引荐来源 (cycling.today)
      */
-    private fun decodeEconfigFromPage(pageUrl: String): MutableMap<String, String>? {
+    private fun decodeEconfigFromPage(pageUrl: String, referer: String = ""): MutableMap<String, String>? {
         try {
-            val body = fetchPageBody(pageUrl) ?: return null
+            val ref = if (referer.isNotBlank()) referer else "https://cycling.today/"
+            val body = fetchPageBody(pageUrl, ref) ?: return null
             return decodeEconfigFromHtml(body)
         } catch (_: Exception) { }
         return null
@@ -236,11 +238,11 @@ object StreamExtractor {
 
     /**
      * 从 HTML 文本中查找 _econfig 变量并解码
+     * 支持 window._econfig='...' / var _econfig="..." / let _econfig=`...`
      */
     private fun decodeEconfigFromHtml(html: String): MutableMap<String, String>? {
-        // 查找 var _econfig = 或 let _econfig =
         val pat = Pattern.compile(
-            """(?:var|let|const)\s+_econfig\s*=\s*["']([^"']+)["']""",
+            """_econfig\s*=\s*["']([^"']+)["']""",
             Pattern.CASE_INSENSITIVE
         )
         val m = pat.matcher(html)
@@ -255,7 +257,7 @@ object StreamExtractor {
      *
      * 算法:
      *   1. base64 decode → bytes
-     *   2. 分成 4 chunk → 重排 [2,0,3,1]
+     *   2. 分成 4 chunk (ceil 除法) → 重排 [2,0,3,1]
      *   3. 每 chunk 去掉第 4 个字符
      *   4. 每 chunk base64 decode
      *   5. 拼接 → base64 decode → JSON
@@ -264,7 +266,8 @@ object StreamExtractor {
         try {
             val decoded1 = Base64.decode(econfig, Base64.DEFAULT)
 
-            val chunkLen = decoded1.size / 4
+            // ceiling 除法，和 Python (size+3)//4 一致
+            val chunkLen = (decoded1.size + 3) / 4
             val chunks = arrayOf(
                 decoded1.copyOfRange(0, chunkLen),
                 decoded1.copyOfRange(chunkLen, chunkLen * 2),
@@ -306,14 +309,14 @@ object StreamExtractor {
 
     // ─── HTTP 工具 ─────────────────────────────────────────────────────────
 
-    private fun fetchPageBody(url: String): String? {
+    private fun fetchPageBody(url: String, referer: String = "https://www.google.com/"): String? {
         return try {
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", uaDesktop)
                 .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Referer", "https://www.google.com/")
+                .header("Referer", referer)
                 .build()
             client.newCall(req).execute().use { it.body?.string() }
         } catch (_: Exception) { null }
