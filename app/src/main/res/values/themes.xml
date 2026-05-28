@@ -14,4 +14,20 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
     </style>
+
+    <!-- 对话框深色主题 -->
+    <style name="CyclingDialog" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="colorPrimary">#E94560</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#AAAAAA</item>
+        <item name="android:background">#1E1E2E</item>
+        <item name="buttonBarPositiveButtonStyle">@style/CyclingDialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/CyclingDialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/CyclingDialogButton</item>
+    </style>
+
+    <style name="CyclingDialogButton" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">#E94560</item>
+    </style>
 </resources>

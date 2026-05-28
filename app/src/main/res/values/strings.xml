@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">Cycling TV</string>
+    <string name="btn_fetch">🔍 多源抓取</string>
+    <string name="btn_streams">📡 流列表</string>
+    <string name="toolbar_title">🚴 Cycling TV</string>
+    <string name="source_idle">等待抓取…</string>
+    <string name="source_fetching">正在抓取直播流…</string>
+    <string name="no_streams">当前未检测到直播流\n\n比赛时段请点击「多源抓取」按钮</string>
+    <string name="fetch_success">✓ %1$d 个源成功，共 %2$d 条流</string>
+    <string name="dlna_scanning">正在扫描局域网 DLNA 设备…</string>
+    <string name="dlna_not_found">未发现 DLNA 设备\n\n请确认：\n1. 手机和电视连接同一 WiFi\n2. 电视已开启 DLNA 功能</string>
+    <string name="cast_success">🎉 投屏成功！请在电视上查看</string>
+    <string name="cast_failed">投屏失败，请检查网络连接</string>
+    <string name="copy_success">已复制到剪贴板</string>
 </resources>
