@@ -1,12 +1,11 @@
 package com.cyclingtv.app
 
 import android.util.Base64
-import kotlin.text.Charsets
-import kotlin.text.RegexOption
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -25,9 +24,9 @@ import java.util.regex.Pattern
  */
 object StreamExtractor {
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // 源定义
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     enum class SourceType {
         CYCLING_TODAY,
@@ -96,20 +95,20 @@ object StreamExtractor {
     // ─── 正则模式池（用于通用匹配）───────────────────────────────────────────────
 
     private val streamPatterns = listOf(
-        Pattern.compile("""https?://[^"'\\s<>]+\.m3u8(?:[^"'\\s<>]*)?"""),
-        Pattern.compile("""https?://[^"'\\s<>]+\.mpd(?:[^"'\\s<>]*)?"""),
-        Pattern.compile("""https?://[^"'\\s<>]*(?:live|stream|hls|rtmp|broadcast|playlist)[^"'\\s<>]*\.m3u8[^"'\\s<>]*"""),
-        Pattern.compile("""rtmps?://[^"'\\s<>]+"""),
-        Pattern.compile("""https?://[^"'\\s<>]*/(?:live|stream|hls|broadcast)/(?!.*\.(?:html|css|js|png|jpg|svg|ico))[^"'\\s<>]{10,}"""),
-        Pattern.compile("""https?://[^"'\\s<>]*/live/[^"'\\s<>]+/index\.m3u8"""),
-        Pattern.compile("""https?://[^"'\\s<>]*\.akamaized\.net[^"'\\s<>]*\.m3u8"""),
-        Pattern.compile("""https?://[^"'\\s<>]*\.cloudfront\.net[^"'\\s<>]*\.m3u8"""),
-        Pattern.compile("""https?://[^"'\\s<>]*\.(?:edge|cdn)[^"'\\s<>]*\.m3u8""")
+        Pattern.compile("https?://[^\\s\"'<>]+\\.m3u8(?:[^\\s\"'<>]*)?", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]+\\.mpd(?:[^\\s\"'<>]*)?", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*(?:live|stream|hls|rtmp|broadcast|playlist)[^\\s\"'<>]*\\.m3u8[^\\s\"'<>]*", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("rtmps?://[^\\s\"'<>]+", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*/(?:live|stream|hls|broadcast)/(?!.*\\.(?:html|css|js|png|jpg|svg|ico))[^\\s\"'<>]{10,}", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*/live/[^\\s\"'<>]+/index\\.m3u8", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*\\.akamaized\\.net[^\\s\"'<>]*\\.m3u8", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*\\.cloudfront\\.net[^\\s\"'<>]*\\.m3u8", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("https?://[^\\s\"'<>]*\\.(?:edge|cdn)[^\\s\"'<>]*\\.m3u8", Pattern.CASE_INSENSITIVE)
     )
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // 公开 API
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * 抓取单个源，返回流地址列表 + 状态
@@ -142,9 +141,9 @@ object StreamExtractor {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // cycling.today — iframe → mindsleep.net → _econfig 解码
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeCyclingToday(): List<String> {
         val urls = mutableListOf<String>()
@@ -153,28 +152,33 @@ object StreamExtractor {
 
         // 策略 A: 提取所有 iframe 并深入解码
         val doc = Jsoup.parse(ctBody)
-        val iframes = doc.select("iframe").mapNotNull { el ->
-            listOf("src", "data-src").firstNotNullOfOrNull { attr ->
-                el.attr(attr).takeIf { it.isNotBlank() && it.startsWith("http") }
+        val iframes = mutableListOf<String>()
+        for (el in doc.select("iframe")) {
+            var found: String? = null
+            for (attr in listOf("src", "data-src")) {
+                val v = el.attr(attr)
+                if (v.isNotBlank() && v.startsWith("http")) {
+                    found = v
+                    break
+                }
+            }
+            if (found != null) {
+                iframes.add(found)
             }
         }
 
         for (iframeUrl in iframes) {
-            urls.addAll(extractFromIframeDeep(iframeUrl, 0))
+            urls.addAll(extractFromIframeDeep(iframeUrl, 0, null))
         }
 
         // 策略 B: 检测 mindsleep.net 链接（可能不在 iframe 中）
         if (urls.isEmpty()) {
-            doc.select("a[href*='mindsleep.net']").forEach { a ->
+            for (a in doc.select("a[href]")) {
                 val href = a.attr("href")
-                if (href.startsWith("http")) {
-                    urls.addAll(extractFromIframeDeep(href, 0))
-                }
-            }
-            doc.select("a[href*='d0000d.com'], a[href*='mixdrop.is']").forEach { a ->
-                val href = a.attr("href")
-                if (href.startsWith("http")) {
-                    urls.addAll(extractFromIframeDeep(href, 0))
+                if (href.contains("mindsleep.net") || href.contains("d0000d.com") || href.contains("mixdrop.is")) {
+                    if (href.startsWith("http")) {
+                        urls.addAll(extractFromIframeDeep(href, 0, null))
+                    }
                 }
             }
         }
@@ -187,10 +191,9 @@ object StreamExtractor {
         return urls.distinct()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // tiz-cycling-live.io — 专用抓取
-    // 策略：主页 → 找赛事链接 → 进入赛事页 → 提取 iframe → 解码
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeTizCycling(): List<String> {
         val urls = mutableListOf<String>()
@@ -200,9 +203,9 @@ object StreamExtractor {
             val body = fetchPageBody(baseUrl) ?: return urls
             val doc = Jsoup.parse(body)
 
-            // 策略 A: 找赛事链接（通常是 <a> 带 href 包含 race/live/stream 等）
+            // 策略 A: 找赛事链接
             val raceLinks = mutableSetOf<String>()
-            doc.select("a[href]").forEach { a ->
+            for (a in doc.select("a[href]")) {
                 val href = a.attr("href").lowercase()
                 val text = a.text().lowercase()
                 if ((href.contains("race") || href.contains("live") || href.contains("stream") ||
@@ -224,7 +227,7 @@ object StreamExtractor {
                 val deepBody = fetchPageBody(link) ?: continue
 
                 // 正则 + DOM
-                streamPatterns.forEach { pat ->
+                for (pat in streamPatterns) {
                     val m = pat.matcher(deepBody)
                     while (m.find()) {
                         val url = m.group().trim()
@@ -234,11 +237,11 @@ object StreamExtractor {
 
                 // iframe 深入
                 val deepDoc = Jsoup.parse(deepBody)
-                deepDoc.select("iframe").forEach { iframe ->
-                    listOf("src", "data-src").forEach { attr ->
+                for (iframe in deepDoc.select("iframe")) {
+                    for (attr in listOf("src", "data-src")) {
                         val src = iframe.attr(attr)
                         if (src.isNotBlank() && src.startsWith("http")) {
-                            urls.addAll(extractFromIframeDeep(src, 1))
+                            urls.addAll(extractFromIframeDeep(src, 1, link))
                         }
                     }
                 }
@@ -261,9 +264,9 @@ object StreamExtractor {
         return urls.distinct()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // freestreams-live — 专用抓取
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeFreestreams(): List<String> {
         val urls = mutableListOf<String>()
@@ -275,7 +278,7 @@ object StreamExtractor {
 
             // 找赛事链接
             val eventLinks = mutableSetOf<String>()
-            doc.select("a[href]").forEach { a ->
+            for (a in doc.select("a[href]")) {
                 val href = a.attr("href")
                 val text = a.text().lowercase()
                 if ((text.contains("giro") || text.contains("tour") || text.contains("cycling") ||
@@ -293,8 +296,8 @@ object StreamExtractor {
                 val eventDoc = Jsoup.parse(eventBody)
 
                 // iframe 深入
-                eventDoc.select("iframe").forEach { iframe ->
-                    listOf("src", "data-src").forEach { attr ->
+                for (iframe in eventDoc.select("iframe")) {
+                    for (attr in listOf("src", "data-src")) {
                         val src = iframe.attr(attr)
                         if (src.isNotBlank() && src.startsWith("http")) {
                             urls.addAll(extractFromIframeDeep(src, 2, link))
@@ -303,7 +306,7 @@ object StreamExtractor {
                 }
 
                 // 正则
-                streamPatterns.forEach { pat ->
+                for (pat in streamPatterns) {
                     val m = pat.matcher(eventBody)
                     while (m.find()) {
                         val url = m.group().trim()
@@ -324,21 +327,20 @@ object StreamExtractor {
         return urls.distinct()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // steephill.tv — 聚合站抓取
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeSteephill(): List<String> {
         val urls = mutableListOf<String>()
 
         try {
-            // steephill 首页有赛事列表（如 giro, tour de france 等）
             val body = fetchPageBody("https://www.steephill.tv/") ?: return urls
             val doc = Jsoup.parse(body)
 
             // 找当前赛事链接
             val eventLinks = mutableSetOf<String>()
-            doc.select("a[href]").forEach { a ->
+            for (a in doc.select("a[href]")) {
                 val href = a.attr("href").lowercase()
                 val text = a.text().lowercase()
                 if ((href.contains("giro") || href.contains("tour-de-france") ||
@@ -356,7 +358,7 @@ object StreamExtractor {
                 val eventBody = fetchPageBody(link) ?: continue
 
                 // 正则
-                streamPatterns.forEach { pat ->
+                for (pat in streamPatterns) {
                     val m = pat.matcher(eventBody)
                     while (m.find()) {
                         val url = m.group().trim()
@@ -366,11 +368,10 @@ object StreamExtractor {
 
                 // 外部链接深入
                 val eventDoc = Jsoup.parse(eventBody)
-                eventDoc.select("a[href]").forEach { a ->
+                for (a in eventDoc.select("a[href]")) {
                     val href = a.attr("href")
                     if (href.startsWith("http") && !href.contains("steephill.tv") &&
                         !isAdDomain(href)) {
-                        // 对于外部链接，用通用方法浅抓
                         urls.addAll(scrapeUrlShallow(href))
                     }
                 }
@@ -381,9 +382,9 @@ object StreamExtractor {
         return urls.distinct().take(20)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // cyclingfans.com — 聚合站抓取
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeCyclingfans(): List<String> {
         val urls = mutableListOf<String>()
@@ -393,7 +394,7 @@ object StreamExtractor {
             val doc = Jsoup.parse(body)
 
             // 外部链接深入
-            doc.select("a[href]").forEach { a ->
+            for (a in doc.select("a[href]")) {
                 val href = a.attr("href")
                 val text = a.text().lowercase()
                 if (href.startsWith("http") && !href.contains("cyclingfans.com") &&
@@ -414,9 +415,9 @@ object StreamExtractor {
         return urls.distinct().take(20)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // YouTube 搜索
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeYoutube(): List<String> {
         val urls = mutableListOf<String>()
@@ -436,10 +437,12 @@ object StreamExtractor {
 
                 val body = client.newCall(req).execute().use { it.body?.string() ?: continue }
 
-                val watchRegex = Regex("""/watch\?v=([a-zA-Z0-9_-]{11})""")
-                val seen = urls.map { it.substringAfter("v=").take(11) }.toMutableSet()
-                watchRegex.findAll(body).forEach { match ->
-                    val videoId = match.groupValues[1]
+                // 用 Pattern 而不是 Kotlin Regex，避免 RegexOption 问题
+                val watchPattern = Pattern.compile("/watch\\?v=([a-zA-Z0-9_-]{11})")
+                val seen = mutableSetOf<String>()
+                val m = watchPattern.matcher(body)
+                while (m.find()) {
+                    val videoId = m.group(1)
                     if (seen.add(videoId)) {
                         urls.add("https://www.youtube.com/watch?v=$videoId")
                     }
@@ -452,9 +455,9 @@ object StreamExtractor {
         return urls.take(15)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // 通用抓取
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun scrapeGeneric(pageUrl: String, sourceName: String): List<String> {
         val urls = mutableListOf<String>()
@@ -463,7 +466,7 @@ object StreamExtractor {
             val body = fetchPageBody(pageUrl) ?: return urls
 
             // 1. 正则
-            streamPatterns.forEach { pat ->
+            for (pat in streamPatterns) {
                 val matcher = pat.matcher(body)
                 while (matcher.find()) {
                     val url = matcher.group().trim()
@@ -475,9 +478,10 @@ object StreamExtractor {
             val doc = Jsoup.parse(body)
 
             // video / source 标签
-            doc.select("video, video source, source").forEach { el ->
-                listOf("src", "data-src", "data-url", "data-stream").forEach { attr ->
-                    el.attr(attr).takeIf { it.isNotBlank() }?.let { v ->
+            for (el in doc.select("video, video source, source")) {
+                for (attr in listOf("src", "data-src", "data-url", "data-stream")) {
+                    val v = el.attr(attr)
+                    if (v.isNotBlank()) {
                         if (v.startsWith("http") && isValidStreamUrl(v)) urls.add(v)
                         else if (v.startsWith("//")) {
                             val full = "https:$v"
@@ -488,8 +492,8 @@ object StreamExtractor {
             }
 
             // iframe 深入
-            doc.select("iframe").forEach { el ->
-                listOf("src", "data-src").forEach { attr ->
+            for (el in doc.select("iframe")) {
+                for (attr in listOf("src", "data-src")) {
                     val v = el.attr(attr)
                     if (v.isNotBlank() && v.startsWith("http") && !isAdDomain(v)) {
                         urls.addAll(extractFromIframeDeep(v, 1, pageUrl))
@@ -498,16 +502,18 @@ object StreamExtractor {
             }
 
             // 链接
-            doc.select("a[href$=.m3u8], a[href$=.mpd]").forEach { el ->
-                el.attr("href").takeIf { it.isNotBlank() && it.startsWith("http") }?.let {
-                    urls.add(it)
+            for (el in doc.select("a[href$=.m3u8], a[href$=.mpd]")) {
+                val href = el.attr("href")
+                if (href.isNotBlank() && href.startsWith("http")) {
+                    urls.add(href)
                 }
             }
 
-            // 3. JS 内联
-            val jsRegex = Regex("""["'](https?://[^"']*\.m3u8[^"']*)["']""", RegexOption.IGNORE_CASE)
-            jsRegex.findAll(body).forEach { match ->
-                val url = match.groupValues[1]
+            // 3. JS 内联 —— 用 Pattern 避免 RegexOption
+            val jsPattern = Pattern.compile("[\"'](https?://[^\"']*\\.m3u8[^\"']*)[\"']", Pattern.CASE_INSENSITIVE)
+            val jsM = jsPattern.matcher(body)
+            while (jsM.find()) {
+                val url = jsM.group(1)
                 if (isValidStreamUrl(url)) urls.add(url)
             }
 
@@ -531,7 +537,7 @@ object StreamExtractor {
         try {
             val body = fetchPageBody(url) ?: return urls
 
-            streamPatterns.forEach { pat ->
+            for (pat in streamPatterns) {
                 val m = pat.matcher(body)
                 while (m.find()) {
                     val u = m.group().trim()
@@ -540,22 +546,27 @@ object StreamExtractor {
             }
 
             val doc = Jsoup.parse(body)
-            doc.select("video source, source, video").forEach { el ->
-                listOf("src", "data-src").forEach { attr ->
-                    el.attr(attr).takeIf { it.startsWith("http") && isValidStreamUrl(it) }
-                        ?.let { urls.add(it) }
+            for (el in doc.select("video source, source, video")) {
+                for (attr in listOf("src", "data-src")) {
+                    val v = el.attr(attr)
+                    if (v.startsWith("http") && isValidStreamUrl(v)) {
+                        urls.add(v)
+                    }
                 }
             }
-            doc.select("a[href$=.m3u8]").forEach { urls.add(it.attr("href")) }
+            for (el in doc.select("a[href$=.m3u8]")) {
+                val href = el.attr("href")
+                if (href.isNotBlank()) urls.add(href)
+            }
         } catch (_: Exception) { }
         return urls
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // iframe 深度提取（最多 3 层）
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
-    private fun extractFromIframeDeep(iframeUrl: String, depth: Int, referer: String? = null): List<String> {
+    private fun extractFromIframeDeep(iframeUrl: String, depth: Int, referer: String?): List<String> {
         if (depth > 3 || isAdDomain(iframeUrl)) return emptyList()
         val urls = mutableListOf<String>()
 
@@ -592,7 +603,7 @@ object StreamExtractor {
             }
 
             // ── 正则匹配 ──
-            streamPatterns.forEach { pat ->
+            for (pat in streamPatterns) {
                 val m = pat.matcher(body)
                 while (m.find()) {
                     val url = m.group().trim()
@@ -602,17 +613,19 @@ object StreamExtractor {
 
             // ── DOM 直接提取 ──
             val doc = Jsoup.parse(body)
-            doc.select("video source, source").forEach { el ->
-                listOf("src", "data-src").forEach { attr ->
-                    el.attr(attr).takeIf { it.startsWith("http") && isValidStreamUrl(it) }
-                        ?.let { urls.add(it) }
+            for (el in doc.select("video source, source")) {
+                for (attr in listOf("src", "data-src")) {
+                    val v = el.attr(attr)
+                    if (v.startsWith("http") && isValidStreamUrl(v)) {
+                        urls.add(v)
+                    }
                 }
             }
 
             // ── 更深层 iframe ──
             if (urls.isEmpty()) {
-                doc.select("iframe").forEach { el ->
-                    listOf("src", "data-src").forEach { attr ->
+                for (el in doc.select("iframe")) {
+                    for (attr in listOf("src", "data-src")) {
                         val nestedUrl = el.attr(attr)
                         if (nestedUrl.isNotBlank() && nestedUrl.startsWith("http")) {
                             urls.addAll(extractFromIframeDeep(nestedUrl, depth + 1, iframeUrl))
@@ -626,9 +639,9 @@ object StreamExtractor {
         return urls
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // _econfig 双层 base64 解码核心
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * 从页面 HTML 及外部 JS 中提取并解码 _econfig
@@ -640,10 +653,10 @@ object StreamExtractor {
         }
 
         // 查找外部 stream.js / player.js
-        val scriptRegex = Regex("""<script[^>]*src=["']([^"']*(?:stream|player|embed|main)[^"']*\.js)["'][^>]*>""", RegexOption.IGNORE_CASE)
-        val scriptMatch = scriptRegex.find(pageBody)
-        if (scriptMatch != null) {
-            var scriptUrl = scriptMatch.groupValues[1]
+        val scriptPattern = Pattern.compile("<script[^>]*src=[\"']([^\"']*(?:stream|player|embed|main)[^\"']*\\.js)[\"'][^>]*>", Pattern.CASE_INSENSITIVE)
+        val scriptMatch = scriptPattern.matcher(pageBody)
+        if (scriptMatch.find()) {
+            var scriptUrl = scriptMatch.group(1)
             if (!scriptUrl.startsWith("http")) {
                 scriptUrl = resolveUrl(pageUrl, scriptUrl)
             }
@@ -661,13 +674,13 @@ object StreamExtractor {
 
     private fun extractEconfigValue(text: String): String? {
         val patterns = listOf(
-            Regex("""_econfig\s*=\s*'([^']+)'"""),
-            Regex("""_econfig\s*=\s*"([^"]+)""""),
-            Regex("""_econfig\s*=\s*`([^`]+)`""")
+            Pattern.compile("_econfig\\s*=\\s*'([^']+)'"),
+            Pattern.compile("_econfig\\s*=\\s*\"([^\"]+)\""),
+            Pattern.compile("_econfig\\s*=\\s*`([^`]+)`")
         )
         for (pat in patterns) {
-            val match = pat.find(text)
-            if (match != null) return match.groupValues[1]
+            val m = pat.matcher(text)
+            if (m.find()) return m.group(1)
         }
         return null
     }
@@ -688,24 +701,43 @@ object StreamExtractor {
             }
 
             val reorder = intArrayOf(2, 0, 3, 1)
-            val reordered = reorder.map { chunks[it] }
-
-            val trimmed = reordered.map { chunk ->
-                val s = String(chunk, Charsets.ISO_8859_1)
-                s.substring(0, 3) + s.substring(4)
+            val reordered = mutableListOf<ByteArray>()
+            for (idx in reorder) {
+                reordered.add(chunks[idx])
             }
 
-            val fromChunks = trimmed.map { Base64.decode(it, Base64.DEFAULT) }
-            val combined = fromChunks.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
-            val final = Base64.decode(combined, Base64.DEFAULT)
-            val json = JSONObject(String(final, Charsets.UTF_8))
+            val trimmed = mutableListOf<String>()
+            for (chunk in reordered) {
+                val s = String(chunk, StandardCharsets.ISO_8859_1)
+                // 去掉每块第4个字符（JS里 push(chars[3]) 是干扰字符）
+                val trimmedStr = s.substring(0, 3) + s.substring(4)
+                trimmed.add(trimmedStr)
+            }
+
+            val fromChunks = mutableListOf<ByteArray>()
+            for (t in trimmed) {
+                fromChunks.add(Base64.decode(t, Base64.DEFAULT))
+            }
+
+            // 拼接所有块
+            var totalLen = 0
+            for (b in fromChunks) totalLen += b.size
+            val combined = ByteArray(totalLen)
+            var offset = 0
+            for (b in fromChunks) {
+                System.arraycopy(b, 0, combined, offset, b.size)
+                offset += b.size
+            }
+
+            val finalBytes = Base64.decode(combined, Base64.DEFAULT)
+            val json = JSONObject(String(finalBytes, StandardCharsets.UTF_8))
 
             mapOf(
                 "stream_url" to json.optString("stream_url", ""),
                 "stream_url_nop2p" to json.optString("stream_url_nop2p", ""),
                 "p2p_tracker" to json.optString("p2p_tracker", ""),
-                "autoplay" to json.optString("autoplay", "").ifBlank { "true" },
-                "debug" to json.optString("debug", "").ifBlank { "false" }
+                "autoplay" to json.optString("autoplay", "true"),
+                "debug" to json.optString("debug", "false")
             )
         } catch (e: Exception) {
             e.printStackTrace()
@@ -713,9 +745,9 @@ object StreamExtractor {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // HTTP 工具
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun fetchPageBody(url: String): String? {
         return try {
@@ -742,9 +774,9 @@ object StreamExtractor {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     // 辅助
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private fun isValidStreamUrl(url: String): Boolean {
         val lower = url.lowercase()
