@@ -6,7 +6,6 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- ExoPlayer 播放器 -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="0dp"
@@ -19,7 +18,6 @@
         app:show_buffering="when_playing"
         app:resize_mode="fit"/>
 
-    <!-- DLNA 投屏进度指示 -->
     <ProgressBar
         android:id="@+id/progressDlna"
         style="?android:attr/progressBarStyle"
@@ -31,15 +29,18 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:visibility="gone"/>
 
-    <!-- 投屏按钮（右上角悬浮）-->
-    <androidx.mediarouter.app.MediaRouteButton
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCast"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:text="📺 投屏"
+        android:textSize="12sp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp"
         android:layout_marginEnd="8dp"
-        android:background="@android:color/transparent"/>
+        app:backgroundTint="#E94560"
+        android:textColor="#FFFFFF"
+        style="@style/Widget.MaterialComponents.Button"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
