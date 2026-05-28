@@ -13,8 +13,7 @@
         app:use_controller="true"
         app:show_buffering="when_playing"
         app:resize_mode="zoom"
-        app:surface_type="texture_view"
-        app:controller_show_timeout_ms="3000" />
+        app:surface_type="texture_view" />
 
     <ProgressBar
         android:id="@+id/progressDlna"
