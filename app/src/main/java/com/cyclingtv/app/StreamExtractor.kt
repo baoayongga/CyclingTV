@@ -12,10 +12,9 @@ import java.util.regex.Pattern
  * 多源直播流提取引擎
  *
  * 支持来源：
- * 1. cycling.today — 主源（聚合站）
- * 2. tiz-cycling-live.io — 备用源1
- * 3. sport.freestreams-live.mp — 备用源2
- * 4. YouTube 搜索 — 备用源3（搜索赛事直播）
+ * 1. cycling.today — 主源（聚合站，mindsleep _econfig 解码）
+ * 2. cyclingtiz.live — 备用源1
+ * 3. YouTube 搜索 — 备用源2（搜索赛事直播）
  */
 object StreamExtractor {
 
@@ -51,8 +50,7 @@ object StreamExtractor {
     // 所有支持的源
     val allSources = listOf(
         SourceInfo("cycling.today",      "https://cycling.today/"),
-        SourceInfo("tiz-cycling-live.io","https://tiz-cycling-live.io/"),
-        SourceInfo("freestreams-live",   "http://sport.freestreams-live.mp/cycling/"),
+        SourceInfo("cyclingtiz.live",    "https://cyclingtiz.live/"),
         SourceInfo("YouTube 搜索",       "https://www.youtube.com/results?search_query=cycling+live+stream+today&sp=CAM%253D", isYoutube = true)
     )
 
