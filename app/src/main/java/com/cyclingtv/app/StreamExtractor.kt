@@ -275,8 +275,10 @@ object StreamExtractor {
                 decoded1.copyOfRange(chunkLen * 3, decoded1.size)
             )
 
-            // 重排顺序: [2, 0, 3, 1]
-            val ordered = arrayOf(chunks[2], chunks[0], chunks[3], chunks[1])
+            // JS 的 reorder 逻辑: [2,0,3,1] 是存储位置映射
+            // chunk[i] → 存储到 result[reorder[i]], 最终 join 0,1,2,3
+            // 等效拼接顺序: [1, 3, 0, 2]
+            val ordered = arrayOf(chunks[1], chunks[3], chunks[0], chunks[2])
 
             // 每段去掉第 4 字节 (index 3)，然后 base64 decode
             val parts = ordered.map { chunk ->
