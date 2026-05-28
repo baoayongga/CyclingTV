@@ -138,7 +138,8 @@ class PlayerActivity : AppCompatActivity() {
                     AlertDialog.Builder(this@PlayerActivity)
                         .setTitle("📺 选择电视")
                         .setItems(devices.map { "${it.friendlyName}  (${it.ip})" }.toTypedArray()) { _, idx ->
-                            castToDlnaDevice(devices[idx].controlUrl, devices[idx].ip)
+                            val d = devices[idx]
+                            castToDlnaDevice(d.controlUrl, d.ip, d.supportedFormats)
                         }.setNegativeButton("取消", null).show()
                 }
             }
@@ -152,37 +153,74 @@ class PlayerActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("输入电视 IP 地址")
-            .setMessage("在电视「设置→网络→网络状态」可查看 IP")
+            .setMessage("在电视「设置→网络→网络状态」可查看 IP\n\n输入后会自动探测 DLNA 控制地址")
             .setView(editText)
-            .setPositiveButton("投屏") { _, _ ->
+            .setPositiveButton("探测并投屏") { _, _ ->
                 val ip = editText.text.toString().trim()
-                if (ip.isNotBlank()) castToDlnaDevice("http://$ip:7676/dmr/control/AVTransport1", ip)
+                if (ip.isNotBlank()) discoverAndCast(ip)
             }.setNegativeButton("取消", null).show()
     }
 
-    private fun castToDlnaDevice(controlUrl: String, ip: String) {
+    private fun discoverAndCast(ip: String) {
+        Toast.makeText(this, "正在探测 $ip 的 DLNA 服务...", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val device = DlnaCaster.discoverByIp(ip)
+            withContext(Dispatchers.Main) {
+                if (device != null) {
+                    val hls = device.supportedFormats.any {
+                        it.contains("mpegurl", ignoreCase = true) || it.contains("hls", ignoreCase = true)
+                    }
+                    val info = if (device.supportedFormats.isNotEmpty()) {
+                        "支持格式: " + device.supportedFormats.take(3).joinToString(", ") + "..."
+                    } else "格式未知"
+                    if (hls) {
+                        Toast.makeText(this@PlayerActivity, "${device.friendlyName}\n$info", Toast.LENGTH_LONG).show()
+                    } else {
+                        AlertDialog.Builder(this@PlayerActivity)
+                            .setTitle("警告: 电视可能不支持 HLS")
+                            .setMessage("${device.friendlyName}\n$info\n\n未检测到 HLS/m3u8 支持，" +
+                                "投屏可能失败。是否仍要尝试？")
+                            .setPositiveButton("仍然尝试") { _, _ ->
+                                castToDlnaDevice(device.controlUrl, ip, device.supportedFormats)
+                            }
+                            .setNegativeButton("取消", null).show()
+                        return@withContext
+                    }
+                    castToDlnaDevice(device.controlUrl, ip, device.supportedFormats)
+                } else {
+                    AlertDialog.Builder(this@PlayerActivity)
+                        .setTitle("未探测到 DLNA 服务")
+                        .setMessage("$ip 上未找到 DLNA/UPnP 服务。\n\n请确认：\n1. 电视和手机连接同一 WiFi\n2. 电视已开启 DLNA 功能\n3. IP 地址正确")
+                        .setPositiveButton("自动扫描") { _, _ -> scanAndCastDlna() }
+                        .setNegativeButton("取消", null).show()
+                }
+            }
+        }
+    }
+
+    private fun castToDlnaDevice(controlUrl: String, ip: String, formats: List<String> = emptyList()) {
         Toast.makeText(this, "正在向 $ip 投屏...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
             val (success, errorMsg) = DlnaCaster.castTo(controlUrl, streamUrl, "Cycling Today 直播")
             withContext(Dispatchers.Main) {
                 if (success) {
-                    Toast.makeText(this@PlayerActivity, "🎉 投屏成功！请在电视上查看", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@PlayerActivity, "投屏成功！请在电视上查看", Toast.LENGTH_LONG).show()
                     exoPlayer?.pause()
                 } else {
                     val detail = if (errorMsg.isNotBlank()) errorMsg else "未知错误"
+                    val formatsInfo = if (formats.isNotEmpty()) {
+                        "\n\n电视支持格式:\n" + formats.joinToString("\n") { "  / $it" }
+                    } else ""
                     AlertDialog.Builder(this@PlayerActivity)
                         .setTitle("投屏失败")
                         .setMessage(
                             "目标: $ip\n\n" +
-                            "错误: $detail\n\n" +
-                            "可能原因:\n" +
-                            "1. 电视无法直接访问该直播源（CDN 限制）\n" +
-                            "2. 电视 DLNA 不支持 HLS/m3u8 格式\n" +
-                            "3. 电视与手机不在同一网段\n\n" +
-                            "已自动尝试 3 种降级策略，均失败。"
+                            "错误: $detail$formatsInfo\n\n" +
+                            "电视 DLNA 通常不支持 HLS/m3u8 直播流。\n" +
+                            "建议通过电视浏览器直接打开本页面。"
                         )
-                        .setPositiveButton("重试") { _, _ -> castToDlnaDevice(controlUrl, ip) }
-                        .setNegativeButton("本机播放") { _, _ -> binding.playerView.visibility = View.VISIBLE }
+                        .setPositiveButton("重试") { _, _ -> castToDlnaDevice(controlUrl, ip, formats) }
+                        .setNegativeButton("本机播放") { _, _ -> }
                         .setNeutralButton("取消", null).show()
                 }
             }

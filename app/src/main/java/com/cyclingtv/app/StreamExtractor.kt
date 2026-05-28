@@ -200,8 +200,11 @@ object StreamExtractor {
             for (iframeUrl in iframeUrls) {
                 val decoded = decodeEconfigFromPage(iframeUrl)
                 if (decoded != null) {
+                    // 优先使用无 P2P 流（更流畅、投屏兼容性更好）
+                    val noP2pUrl = decoded["stream_url_nop2p"]
+                    if (!noP2pUrl.isNullOrBlank()) urls.add(noP2pUrl)
                     val streamUrl = decoded["stream_url"]
-                    if (!streamUrl.isNullOrBlank()) urls.add(streamUrl)
+                    if (!streamUrl.isNullOrBlank() && streamUrl != noP2pUrl) urls.add(streamUrl)
                 }
                 // 也递归深入一层
                 val deepBody = fetchPageBody(iframeUrl)
@@ -253,20 +256,27 @@ object StreamExtractor {
     }
 
     /**
-     * 解码 _econfig 值: 双层 base64 + 字符洗牌
+     * 解码 _econfig 值: mindsleep.net 三重 base64 + 字符洗牌
      *
-     * 算法:
-     *   1. base64 decode → bytes
-     *   2. 分成 4 chunk (ceil 除法) → 重排 [2,0,3,1]
-     *   3. 每 chunk 去掉第 4 个字符
-     *   4. 每 chunk base64 decode
-     *   5. 拼接 → base64 decode → JSON
+     * JS 原始算法 (mindsleep.net/assets/stream.js):
+     *   1. atob(econfig) → binary string b
+     *   2. split b into 4 chunks (ceil division)
+     *   3. For each chunk i (in order 0,1,2,3):
+     *      - trim: remove char at index 3
+     *      - atob(trimmed) → individually decoded binary
+     *      - store result at reorder[i] position (reorder=[2,0,3,1])
+     *   4. join result array in order 0,1,2,3
+     *   5. atob(joined) → JSON.parse
+     *
+     * 最终拼接顺序等价于:
+     *   atob(trim(chunk1)) + atob(trim(chunk3)) + atob(trim(chunk0)) + atob(trim(chunk2))
      */
     fun decodeEconfig(econfig: String): MutableMap<String, String>? {
         try {
+            // Step 1: atob(econfig)
             val decoded1 = Base64.decode(econfig, Base64.DEFAULT)
 
-            // ceiling 除法，和 Python (size+3)//4 一致
+            // Step 2: split into 4 chunks
             val chunkLen = (decoded1.size + 3) / 4
             val chunks = arrayOf(
                 decoded1.copyOfRange(0, chunkLen),
@@ -275,24 +285,25 @@ object StreamExtractor {
                 decoded1.copyOfRange(chunkLen * 3, decoded1.size)
             )
 
-            // JS 的 reorder 逻辑: [2,0,3,1] 是存储位置映射
-            // chunk[i] → 存储到 result[reorder[i]], 最终 join 0,1,2,3
-            // 等效拼接顺序: [1, 3, 0, 2]
-            val ordered = arrayOf(chunks[1], chunks[3], chunks[0], chunks[2])
+            // Step 3: For each chunk i (0,1,2,3):
+            //   trim index 3 → atob individually → store at reorder[i]
+            val reorder = intArrayOf(2, 0, 3, 1)
+            val resultArr = arrayOfNulls<ByteArray>(4)
 
-            // 每段去掉第 4 字节 (index 3)，然后 base64 decode
-            val parts = ordered.map { chunk ->
-                val s = String(chunk, charset("ISO-8859-1"))
-                if (s.length >= 4) {
-                    val trimmed = s.substring(0, 3) + s.substring(4)
-                    Base64.decode(trimmed, Base64.DEFAULT)
+            for (i in 0 until 4) {
+                val s = String(chunks[i], charset("ISO-8859-1"))
+                val trimmed = if (s.length >= 4) {
+                    s.substring(0, 3) + s.substring(4)
                 } else {
-                    chunk
+                    s
                 }
+                resultArr[reorder[i]] = Base64.decode(trimmed, Base64.DEFAULT)
             }
 
-            // 拼接所有 parts
-            val combined = parts.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+            // Step 4: join in order 0,1,2,3
+            val combined = resultArr.fold(ByteArray(0)) { acc, bytes -> acc + bytes!! }
+
+            // Step 5: final atob → JSON
             val final = Base64.decode(combined, Base64.DEFAULT)
             val json = JSONObject(String(final, charset("UTF-8")))
 

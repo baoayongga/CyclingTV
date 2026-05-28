@@ -5,20 +5,17 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.DatagramPacket
-import java.net.InetAddress
-import java.net.MulticastSocket
-import java.net.SocketTimeoutException
-import java.net.URI
+import java.net.*
 import java.util.concurrent.TimeUnit
 
 /**
- * DLNA/UPnP 投屏工具 v4
+ * DLNA/UPnP 投屏工具 v5
  *
- * v4 新增：
- * - 降级重试：先试完整 metadata → 失败则试空 metadata
- * - 多 protocolInfo 回退：apple.mpegurl → video/mpeg
- * - 超时调整为 15s，某些电视处理慢
+ * v5 新增：
+ * - 自动发现 AVTransport 控制 URL（抓取设备描述 XML）
+ * - GetProtocolInfo 查询电视支持的媒体格式
+ * - 多控制路径自动尝试
+ * - 更详细的错误诊断
  */
 object DlnaCaster {
 
@@ -44,8 +41,11 @@ object DlnaCaster {
     data class DlnaDevice(
         val ip: String,
         val friendlyName: String,
-        val controlUrl: String
+        val controlUrl: String,
+        val supportedFormats: List<String> = emptyList()
     )
+
+    // ─── 设备发现 ───────────────────────────────────────────────────────────────
 
     fun scanDevices(): List<DlnaDevice> {
         val devices = mutableListOf<DlnaDevice>()
@@ -70,11 +70,9 @@ object DlnaCaster {
                     val device = fetchDeviceInfo(loc, ip)
                     if (device != null && devices.none { it.ip == ip }) {
                         devices.add(device)
-                        Log.d(TAG, "发现设备: ${device.friendlyName} @ ${device.ip}")
+                        Log.d(TAG, "发现: ${device.friendlyName} @ ${device.ip}")
                     }
-                } catch (_: SocketTimeoutException) {
-                    break
-                }
+                } catch (_: SocketTimeoutException) { break }
             }
             socket.close()
         } catch (e: Exception) {
@@ -83,32 +81,111 @@ object DlnaCaster {
         return devices
     }
 
+    /**
+     * 通过 IP 自动发现控制 URL。
+     * 尝试常见端口和路径获取设备描述 XML，从中提取 AVTransport 控制地址。
+     */
+    fun discoverByIp(ip: String): DlnaDevice? {
+        // 常见 UPnP 描述 XML 位置
+        val candidates = listOf(
+            "http://$ip:7676/description.xml",
+            "http://$ip:7676/dmr/description.xml",
+            "http://$ip:49494/description.xml",
+            "http://$ip:5000/description.xml",
+            "http://$ip:38520/description.xml",
+            "http://$ip:8080/description.xml",
+            "http://$ip:80/description.xml",
+            // 小米电视
+            "http://$ip:6095/description.xml",
+            // 海信电视
+            "http://$ip:52323/description.xml",
+            // 创维/酷开
+            "http://$ip:8060/description.xml"
+        )
+
+        for (candidateUrl in candidates) {
+            try {
+                val req = Request.Builder().url(candidateUrl)
+                    .header("User-Agent", "Android/13 UPnP/1.1")
+                    .build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val xml = resp.body?.string() ?: continue
+                    val device = parseDeviceInfo(xml, candidateUrl, ip)
+                    if (device != null) {
+                        Log.d(TAG, "发现 $ip → ${device.controlUrl}")
+                        return device
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+
+        // 兜底：尝试常用默认路径
+        val defaultPaths = listOf(
+            "http://$ip:7676/dmr/control/AVTransport1",
+            "http://$ip:49494/AVTransport/control",
+            "http://$ip:5000/AVTransport/control"
+        )
+        for (path in defaultPaths) {
+            if (testControlUrl(path)) {
+                return DlnaDevice(ip, "电视 ($ip)", path)
+            }
+        }
+
+        return null
+    }
+
     private fun fetchDeviceInfo(locationUrl: String, ip: String): DlnaDevice? {
         return try {
-            val req = Request.Builder().url(locationUrl).build()
+            val req = Request.Builder().url(locationUrl)
+                .header("User-Agent", "Android/13 UPnP/1.1")
+                .build()
             val xml = client.newCall(req).execute().use { it.body?.string() ?: return null }
-
-            val nameMatch = Regex("<friendlyName>([^<]+)</friendlyName>").find(xml)
-            val friendlyName = nameMatch?.groupValues?.get(1) ?: "电视 ($ip)"
-
-            val controlPath = extractAvTransportUrl(xml) ?: return null
-            val controlUrl = resolveUrl(locationUrl, controlPath)
-
-            DlnaDevice(ip, friendlyName, controlUrl)
+            parseDeviceInfo(xml, locationUrl, ip)
         } catch (e: Exception) {
             Log.w(TAG, "获取 $ip 设备信息失败: ${e.message}")
             null
         }
     }
 
-    private fun extractAvTransportUrl(xml: String): String? {
-        val block = Regex(
+    private fun parseDeviceInfo(xml: String, baseUrl: String, ip: String): DlnaDevice? {
+        val nameMatch = Regex("<friendlyName>([^<]+)</friendlyName>", RegexOption.IGNORE_CASE)
+            .find(xml)
+        val friendlyName = nameMatch?.groupValues?.get(1) ?: "电视 ($ip)"
+
+        // 提取 AVTransport 服务
+        val avTransportBlock = Regex(
             "<service>[\\s\\S]*?AVTransport[\\s\\S]*?</service>",
             RegexOption.IGNORE_CASE
-        ).find(xml)?.value ?: return null
+        ).find(xml)?.value
 
-        return Regex("<controlURL>([^<]+)</controlURL>", RegexOption.IGNORE_CASE)
-            .find(block)?.groupValues?.get(1)?.trim()
+        if (avTransportBlock == null) {
+            Log.w(TAG, "$ip 未找到 AVTransport 服务")
+            return null
+        }
+
+        val controlPath = Regex("<controlURL>([^<]+)</controlURL>", RegexOption.IGNORE_CASE)
+            .find(avTransportBlock)?.groupValues?.get(1)?.trim() ?: return null
+
+        val controlUrl = resolveUrl(baseUrl, controlPath)
+
+        // 检查支持的格式
+        val formats = mutableListOf<String>()
+        val connBlock = Regex(
+            "<service>[\\s\\S]*?ConnectionManager[\\s\\S]*?</service>",
+            RegexOption.IGNORE_CASE
+        ).find(xml)?.value
+
+        if (connBlock != null) {
+            val connControl = Regex("<controlURL>([^<]+)</controlURL>", RegexOption.IGNORE_CASE)
+                .find(connBlock)?.groupValues?.get(1)?.trim()
+            if (connControl != null) {
+                val connUrl = resolveUrl(baseUrl, connControl)
+                formats.addAll(getSupportedFormats(connUrl))
+            }
+        }
+
+        return DlnaDevice(ip, friendlyName, controlUrl, formats)
     }
 
     private fun resolveUrl(baseUrl: String, path: String): String {
@@ -124,46 +201,81 @@ object DlnaCaster {
         }
     }
 
-    // ─── AVTransport 投屏（带降级重试）────────────────────────────────────────────
-
-    /**
-     * 向指定 DLNA 设备推送视频流。
-     * 若初次失败，自动尝试降级策略（空 metadata、不同 protocolInfo）。
-     *
-     * @return Pair<Boolean, String> — (是否成功, 错误描述)
-     */
-    fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
-        // 策略 1：完整 metadata + 自动 protocolInfo
-        val (ok1, err1) = tryCast(controlUrl, videoUrl, title, useMetadata = true)
-        if (ok1) return Pair(true, "")
-
-        Log.w(TAG, "策略1 失败 ($err1)，尝试降级策略2（空 metadata）")
-
-        // 策略 2：空 metadata（某些电视对 DIDL-Lite XML 敏感）
-        val (ok2, err2) = tryCast(controlUrl, videoUrl, title, useMetadata = false)
-        if (ok2) return Pair(true, "")
-
-        Log.w(TAG, "策略2 失败 ($err2)，尝试降级策略3（video/mpeg）")
-
-        // 策略 3：空 metadata + 强制 video/mpeg
-        val (ok3, err3) = tryCastWithProtocol(controlUrl, videoUrl, title,
-            useMetadata = false, protocolInfo = "http-get:*:video/mpeg:*")
-        if (ok3) return Pair(true, "")
-
-        // 全部失败，返回综合错误
-        return Pair(false, "SetAVTransportURI 失败: $err1\n\n" +
-                "降级策略也失败。若电视型号较老，可能不支持 HLS 流。" +
-                "\n建议：检查电视能否直接访问该流地址。")
+    private fun testControlUrl(url: String): Boolean {
+        return try {
+            val body = buildGetVolume()
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
+                .addHeader("SOAPAction", "\"urn:schemas-upnp-org:service:RenderingControl:1#GetVolume\"")
+                .post(body.toRequestBody("text/xml".toMediaType()))
+                .build()
+            val resp = client.newCall(req).execute()
+            resp.isSuccessful || resp.body?.string()?.contains("GetVolumeResponse") == true
+        } catch (_: Exception) { false }
     }
 
     /**
-     * 单次投屏尝试
+     * 查询电视支持的媒体格式
      */
+    fun getSupportedFormats(connManagerUrl: String): List<String> {
+        val formats = mutableListOf<String>()
+        try {
+            val body = """<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+    s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetProtocolInfo xmlns:u="urn:schemas-upnp-org:service:ConnectionManager:1"/>
+  </s:Body>
+</s:Envelope>"""
+            val req = Request.Builder()
+                .url(connManagerUrl)
+                .addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
+                .addHeader("SOAPAction", "\"urn:schemas-upnp-org:service:ConnectionManager:1#GetProtocolInfo\"")
+                .post(body.toRequestBody("text/xml".toMediaType()))
+                .build()
+            val resp = client.newCall(req).execute()
+            val xml = resp.body?.string() ?: return formats
+
+            // 提取 Sink 协议信息
+            val sink = Regex("<Sink>(.*?)</Sink>", RegexOption.DOTALL).find(xml)
+            if (sink != null) {
+                val protocols = sink.groupValues[1].split(",")
+                for (p in protocols) {
+                    val trimmed = p.trim()
+                    if (trimmed.isNotBlank()) formats.add(trimmed)
+                }
+            }
+        } catch (_: Exception) { }
+        return formats
+    }
+
+    // ─── AVTransport 投屏（带降级重试）────────────────────────────────────────────
+
+    fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
+        val errors = mutableListOf<String>()
+
+        // 策略 1：完整 metadata + 自动 protocolInfo
+        val (ok1, err1) = tryCast(controlUrl, videoUrl, title, useMetadata = true)
+        if (ok1) return Pair(true, "")
+        errors.add("策略1(完整metadata): $err1")
+
+        // 策略 2：空 metadata
+        val (ok2, err2) = tryCast(controlUrl, videoUrl, title, useMetadata = false)
+        if (ok2) return Pair(true, "")
+        errors.add("策略2(空metadata): $err2")
+
+        // 策略 3：空 metadata + video/mpeg
+        val (ok3, err3) = tryCastWithProtocol(controlUrl, videoUrl, title,
+            useMetadata = false, protocolInfo = "http-get:*:video/mpeg:*")
+        if (ok3) return Pair(true, "")
+        errors.add("策略3(video/mpeg): $err3")
+
+        return Pair(false, errors.joinToString("\n"))
+    }
+
     private fun tryCast(
-        controlUrl: String,
-        videoUrl: String,
-        title: String,
-        useMetadata: Boolean
+        controlUrl: String, videoUrl: String, title: String, useMetadata: Boolean
     ): Pair<Boolean, String> {
         val protocolInfo = when {
             videoUrl.contains(".m3u8", ignoreCase = true) ->
@@ -174,25 +286,17 @@ object DlnaCaster {
                 "http-get:*:video/mp4:*"
             videoUrl.contains(".ts", ignoreCase = true) ->
                 "http-get:*:video/mp2t:*"
-            else ->
-                "http-get:*:video/mpeg:*"
+            else -> "http-get:*:video/mpeg:*"
         }
         return tryCastWithProtocol(controlUrl, videoUrl, title, useMetadata, protocolInfo)
     }
 
-    /**
-     * 使用指定 protocolInfo 投屏
-     */
     private fun tryCastWithProtocol(
-        controlUrl: String,
-        videoUrl: String,
-        title: String,
-        useMetadata: Boolean,
-        protocolInfo: String
+        controlUrl: String, videoUrl: String, title: String,
+        useMetadata: Boolean, protocolInfo: String
     ): Pair<Boolean, String> {
         return try {
             val setUriBody = buildSetUri(videoUrl, title, useMetadata, protocolInfo)
-
             val (ok1, err1) = soapCall(controlUrl, "SetAVTransportURI", setUriBody)
             if (!ok1) return Pair(false, err1)
 
@@ -207,17 +311,14 @@ object DlnaCaster {
     }
 
     fun stopCast(controlUrl: String): Boolean {
-        try {
+        return try {
             val (ok, _) = soapCall(controlUrl, "Stop", buildStop())
-            return ok
-        } catch (e: Exception) {
-            return false
-        }
+            ok
+        } catch (_: Exception) { false }
     }
 
-    /**
-     * 发送 SOAP 请求，返回 Pair(成功, 错误描述)
-     */
+    // ─── SOAP 调用 ─────────────────────────────────────────────────────────────
+
     private fun soapCall(url: String, action: String, body: String): Pair<Boolean, String> {
         val req = Request.Builder()
             .url(url)
@@ -242,43 +343,30 @@ object DlnaCaster {
             val upnpDesc = errDesc?.groupValues?.get(1)
 
             val detail = buildString {
-                append("UPnP 错误 $code: $str")
-                if (upnpErr != null) append("\n错误码: $upnpErr")
+                append("UPnP $code: $str")
+                if (upnpErr != null) append(" | 错误码: $upnpErr")
                 if (upnpDesc != null) append(" ($upnpDesc)")
-                // 解析常见 UPnP 错误码
                 when (upnpErr) {
-                    "402" -> append("\n→ 该电视不支持此媒体格式，请尝试其他流")
-                    "701" -> append("\n→ 转换不可用")
-                    "714" -> append("\n→ 该电视不支持此媒体格式（ILLEGAL_MIME_TYPE）")
+                    "402" -> append("\n  → 电视不支持此媒体格式")
+                    "701" -> append("\n  → 转换不可用")
+                    "714" -> append("\n  → 不支持的 MIME 类型")
+                    "801" -> append("\n  → 无法连接媒体源")
                 }
             }
-
-            Log.e(TAG, "SOAP Fault ($action): $detail")
             return Pair(false, detail)
         }
 
         if (!resp.isSuccessful) {
-            return Pair(false, "HTTP ${resp.code}")
+            return Pair(false, "HTTP ${resp.code}: ${resp.message}")
         }
 
         return Pair(true, respBody)
     }
 
-    // ─── SOAP 模板 ───────────────────────────────────────────────────────────────
+    // ─── SOAP 模板 ───────────────────────────────────────────────────────────
 
-    private fun buildSetUri(
-        uri: String,
-        title: String,
-        useMetadata: Boolean,
-        protocolInfo: String
-    ): String {
-        val metaDataXml = if (useMetadata) {
-            esc(buildMetaXml(title, uri, protocolInfo))
-        } else {
-            // 空 metadata — 某些老电视需要
-            ""
-        }
-
+    private fun buildSetUri(uri: String, title: String, useMetadata: Boolean, protocolInfo: String): String {
+        val metaDataXml = if (useMetadata) esc(buildMetaXml(title, uri, protocolInfo)) else ""
         return """<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
     s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -321,6 +409,17 @@ object DlnaCaster {
     <u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
       <InstanceID>0</InstanceID>
     </u:Stop>
+  </s:Body>
+</s:Envelope>"""
+
+    private fun buildGetVolume() = """<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+    s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+      <InstanceID>0</InstanceID>
+      <Channel>Master</Channel>
+    </u:GetVolume>
   </s:Body>
 </s:Envelope>"""
 
