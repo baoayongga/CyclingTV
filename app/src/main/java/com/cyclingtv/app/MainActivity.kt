@@ -199,7 +199,11 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("📡 共 ${allStreams.size} 条直播流")
             .setItems(items) { _, pos ->
-                showStreamOptions(allStreams[pos])
+                // 延迟弹出操作菜单，等当前 Dialog 完全关闭后再弹第二个
+                val stream = allStreams[pos]
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    showStreamOptions(stream)
+                }, 150)
             }
             .setPositiveButton("管理来源") { _, _ -> showSourcePicker() }
             .setNegativeButton("关闭", null)
