@@ -62,7 +62,8 @@ class PlayerActivity : AppCompatActivity() {
         // 初始化 Cast
         try {
             castContext = CastContext.getSharedInstance(this)
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
+
 
         initExoPlayer()
         initCastButton()
@@ -84,14 +85,19 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun initCastButton() {
-        CastButtonFactory.setUpMediaRouteButton(
-            applicationContext,
-            binding.btnCast
-        )
+        try {
+            CastButtonFactory.setUpMediaRouteButton(
+                applicationContext,
+                binding.btnCast
+            )
+        } catch (_: Throwable) {
+            binding.btnCast.visibility = View.GONE
+        }
         binding.btnCast.setOnClickListener {
             showCastOptions()
         }
     }
+
 
     private fun showCastOptions() {
         val options = arrayOf(
