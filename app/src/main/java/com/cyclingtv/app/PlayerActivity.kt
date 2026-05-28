@@ -116,10 +116,18 @@ class PlayerActivity : AppCompatActivity() {
                     Toast.makeText(this@PlayerActivity, "🎉 投屏成功！请在电视上查看", Toast.LENGTH_LONG).show()
                     exoPlayer?.pause()
                 } else {
-                    val detail = if (errorMsg.isNotBlank()) "\n\n错误详情：$errorMsg" else ""
+                    val detail = if (errorMsg.isNotBlank()) errorMsg else "未知错误"
                     AlertDialog.Builder(this@PlayerActivity)
                         .setTitle("投屏失败")
-                        .setMessage("无法向 $ip 投屏。$detail\n\n常见原因：\n• 电视 DLNA 不支持 HLS/m3u8 流（多数电视仅支持 MP4）\n• 电视与手机不在同一网段\n• 电视防火墙阻止了请求")
+                        .setMessage(
+                            "目标: $ip\n\n" +
+                            "错误: $detail\n\n" +
+                            "可能原因:\n" +
+                            "1. 电视无法直接访问该直播源（CDN 限制）\n" +
+                            "2. 电视 DLNA 不支持 HLS/m3u8 格式\n" +
+                            "3. 电视与手机不在同一网段\n\n" +
+                            "已自动尝试 3 种降级策略，均失败。"
+                        )
                         .setPositiveButton("重试") { _, _ -> castToDlnaDevice(controlUrl, ip) }
                         .setNegativeButton("本机播放") { _, _ -> binding.playerView.visibility = View.VISIBLE }
                         .setNeutralButton("取消", null).show()
