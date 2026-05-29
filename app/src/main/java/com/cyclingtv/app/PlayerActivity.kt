@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.cyclingtv.app.databinding.ActivityPlayerBinding
 import com.cyclingtv.app.dlna.DlnaCaster
+import com.cyclingtv.app.dlna.HlsProxyServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,6 +30,7 @@ class PlayerActivity : AppCompatActivity() {
     private var streamUrl: String = ""
     private var castMode: Boolean = false
     private var isZoomMode: Boolean = true
+    private var hlsProxy: HlsProxyServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -238,13 +240,16 @@ class PlayerActivity : AppCompatActivity() {
     private fun castToDlnaDevice(controlUrl: String, ip: String, formats: List<String> = emptyList()) {
         Toast.makeText(this, "正在向 $ip 投屏...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
-            val (success, errorMsg) = DlnaCaster.castTo(controlUrl, streamUrl, "Cycling Today 直播")
+            // 用 castHls：支持 HLS → TS 本地代理自动 fallback
+            val (success, msg, proxy) = DlnaCaster.castHls(controlUrl, streamUrl, "Cycling TV 直播")
             withContext(Dispatchers.Main) {
                 if (success) {
-                    Toast.makeText(this@PlayerActivity, "投屏成功！请在电视上查看", Toast.LENGTH_LONG).show()
+                    hlsProxy = proxy  // 保存代理引用，onDestroy 时停止
+                    val tip = if (proxy != null) " (通过本地 TS 代理)" else ""
+                    Toast.makeText(this@PlayerActivity, "投屏成功$tip！请在电视上查看", Toast.LENGTH_LONG).show()
                     exoPlayer?.pause()
                 } else {
-                    val detail = if (errorMsg.isNotBlank()) errorMsg else "未知错误"
+                    val detail = if (msg.isNotBlank()) msg else "未知错误"
                     val formatsInfo = if (formats.isNotEmpty()) {
                         "\n\n电视支持格式:\n" + formats.joinToString("\n") { "  / $it" }
                     } else ""
@@ -254,6 +259,7 @@ class PlayerActivity : AppCompatActivity() {
                             "目标: $ip\n\n" +
                             "错误: $detail$formatsInfo\n\n" +
                             "电视 DLNA 通常不支持 HLS/m3u8 直播流。\n" +
+                            "已尝试本地 TS 代理转换。\n" +
                             "建议通过电视浏览器直接打开本页面。"
                         )
                         .setPositiveButton("重试") { _, _ -> castToDlnaDevice(controlUrl, ip, formats) }
@@ -271,6 +277,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        hlsProxy?.stop()
         exoPlayer?.release()
     }
 

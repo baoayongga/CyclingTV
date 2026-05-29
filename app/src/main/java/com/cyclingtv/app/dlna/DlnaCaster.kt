@@ -160,6 +160,42 @@ object DlnaCaster {
     }
 
     fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
+        return tryCast(controlUrl, videoUrl, title)
+    }
+
+    /**
+     * 智能投屏：HLS 流自动 fallback 到本地 TS 代理
+     * @return Triple(success, message, proxy) — proxy 非 null 表示代理正在运行，调用方负责在投屏结束后 stop
+     */
+    fun castHls(controlUrl: String, videoUrl: String, title: String = "直播"): Triple<Boolean, String, HlsProxyServer?> {
+        // 方案 A+B：直接投屏
+        val (ok, msg) = tryCast(controlUrl, videoUrl, title)
+        if (ok) return Triple(true, msg, null)
+
+        // 方案 C：如果不是 HLS 流，直接返回失败
+        val mimeType = detectMimeType(videoUrl)
+        if (!mimeType.contains("mpegurl") && !mimeType.contains("hls")) {
+            return Triple(false, msg, null)
+        }
+
+        // 电视不支持 HLS → 启动本地 TS 代理
+        val proxy = HlsProxyServer()
+        val localUrl = proxy.start(videoUrl)
+        if (localUrl == null) {
+            return Triple(false, "无法启动本地流代理（请检查 WiFi 连接）", null)
+        }
+
+        val (ok2, msg2) = tryCast(controlUrl, localUrl, "$title (TS 代理)")
+        if (ok2) {
+            return Triple(true, "已通过本地 TS 代理投屏\n代理地址: $localUrl", proxy)
+        } else {
+            proxy.stop()
+            return Triple(false, "电视拒绝了 TS 代理流: $msg2", null)
+        }
+    }
+
+    /** 核心投屏逻辑（方案 A → 方案 B） */
+    private fun tryCast(controlUrl: String, videoUrl: String, title: String): Pair<Boolean, String> {
         return try {
             val mimeType = detectMimeType(videoUrl)
 
@@ -167,16 +203,12 @@ object DlnaCaster {
             val setUriSoap = buildSetAVTransportURI(videoUrl, title, mimeType)
             val r1 = soapPost(controlUrl, "SetAVTransportURI", setUriSoap)
             if (!r1.first) {
-                // 方案 B：如果 500，尝试不带元数据的裸 URI（部分电视简洁版 DLNA 只认这种）
+                // 方案 B：不带元数据的裸 URI（部分电视简洁版 DLNA 只认这种）
                 if (r1.second.startsWith("HTTP 500")) {
                     val rawSoap = buildSetAVTransportURIRaw(videoUrl)
                     val r2 = soapPost(controlUrl, "SetAVTransportURI", rawSoap)
                     if (!r2.first) {
-                        return Pair(false, "电视拒绝了该流格式（$mimeType）\n\n" +
-                            "可能原因：\n" +
-                            "1. 电视 DLNA 不支持 HLS/m3u8 直播流\n" +
-                            "2. 尝试在电视上先打开 DLNA 接收模式\n" +
-                            "3. 换一个 mp4 或 ts 格式的源试试")
+                        return Pair(false, "电视拒绝了该流格式（$mimeType）")
                     }
                 } else {
                     return Pair(false, r1.second)
