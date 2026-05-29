@@ -1,5 +1,6 @@
 package com.cyclingtv.app.dlna
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.wifi.WifiManager
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,12 +47,12 @@ object DlnaCaster {
         val supportedFormats: List<String> = emptyList()
     )
 
+    @SuppressLint("MissingPermission")
     fun scanDevices(): List<DlnaDevice> {
         val devices = mutableListOf<DlnaDevice>()
         // 必须获取 MulticastLock，否则 Android 10+ 会丢弃 SSDP 包
-        val wifiManager = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val lock = wifiManager.createMulticastLock("CyclingTV_DLNA_Scan")
-        lock.setReferenceCounted(false)
         try {
             lock.acquire()
             val socket = MulticastSocket().apply {
