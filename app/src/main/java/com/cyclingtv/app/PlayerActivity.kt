@@ -35,9 +35,7 @@ class PlayerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 初始化 DLNA（MulticastLock 需要 Context）
-        if (!DlnaCaster::appContext.isInitialized) {
-            DlnaCaster.appContext = applicationContext
+        // 初始化 DLNA Context（不需要额外初始化，scanDevices 时传参）
         }
 
         // 真正的沉浸式全屏：SYSTEM_UI_FLAG 比 WindowInsetsController 更可靠
@@ -169,7 +167,7 @@ class PlayerActivity : AppCompatActivity() {
         binding.progressDlna.visibility = View.VISIBLE
         Toast.makeText(this, "正在扫描局域网 DLNA 设备...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
-            val devices = DlnaCaster.scanDevices()
+            val devices = DlnaCaster.scanDevices(this@PlayerActivity)
             withContext(Dispatchers.Main) {
                 binding.progressDlna.visibility = View.GONE
                 if (devices.isEmpty()) {

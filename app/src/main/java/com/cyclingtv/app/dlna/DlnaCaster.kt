@@ -1,6 +1,5 @@
 package com.cyclingtv.app.dlna
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.net.wifi.WifiManager
 import okhttp3.MediaType.Companion.toMediaType
@@ -15,13 +14,10 @@ import java.util.concurrent.TimeUnit
 
 /**
  * DLNA/UPnP 工具类
- * - scanDevices()：SSDP 扫描局域网 DLNA 渲染器
+ * - scanDevices(ctx)：SSDP 扫描局域网 DLNA 渲染器
  * - castTo()：通过 AVTransport SOAP 推送视频流
  */
 object DlnaCaster {
-
-    /** 初始化上下文（用于获取 MulticastLock），调用 scanDevices / discoverByIp 前必须调用 */
-    lateinit var appContext: Context
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -47,11 +43,11 @@ object DlnaCaster {
         val supportedFormats: List<String> = emptyList()
     )
 
-    @SuppressLint("MissingPermission")
-    fun scanDevices(): List<DlnaDevice> {
+    @Suppress("DEPRECATION")
+    fun scanDevices(ctx: Context): List<DlnaDevice> {
         val devices = mutableListOf<DlnaDevice>()
         // 必须获取 MulticastLock，否则 Android 10+ 会丢弃 SSDP 包
-        val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val lock = wifiManager.createMulticastLock("CyclingTV_DLNA_Scan")
         try {
             lock.acquire()
