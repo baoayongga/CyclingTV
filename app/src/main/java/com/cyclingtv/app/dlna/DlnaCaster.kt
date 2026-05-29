@@ -116,6 +116,31 @@ object DlnaCaster {
             .find(block)?.groupValues?.get(1)?.trim()?.trimStart('/')
     }
 
+    // ─── 按 IP 探测 DLNA ─────────────────────────────────────────────────────
+
+    /** 根据 IP 探测 TV 的 DLNA 描述，返回设备信息 */
+    fun discoverByIp(ip: String): DlnaDevice? {
+        val ports = listOf(49494, 80, 8080, 5000, 2869, 1025)
+        for (port in ports) {
+            val loc = "http://$ip:$port/description.xml"
+            try {
+                val device = fetchDeviceDescription(loc, ip)
+                if (device != null) return device
+            } catch (_: Exception) {}
+        }
+        // 最后尝试从 Web 根抓取并搜索 UPnP URL
+        try {
+            val req = Request.Builder().url("http://$ip/").build()
+            val html = client.newCall(req).execute().use { it.body?.string() ?: "" }
+            val descUrl = Regex("""<URLBase>([^<]+)</URLBase>""").find(html)?.groupValues?.get(1)
+                ?: Regex("""(https?://[^"'\s]+description\.xml)""").find(html)?.groupValues?.get(1)
+            if (descUrl != null) {
+                return fetchDeviceDescription(descUrl, ip)
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
     // ─── AVTransport 投屏 ────────────────────────────────────────────────────
 
     fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
