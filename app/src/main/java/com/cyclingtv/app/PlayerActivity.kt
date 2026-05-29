@@ -35,9 +35,6 @@ class PlayerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 初始化 DLNA Context（不需要额外初始化，scanDevices 时传参）
-        }
-
         // 真正的沉浸式全屏：SYSTEM_UI_FLAG 比 WindowInsetsController 更可靠
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
