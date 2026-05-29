@@ -1,5 +1,7 @@
 package com.cyclingtv.app.dlna
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,6 +18,9 @@ import java.util.concurrent.TimeUnit
  * - castTo()：通过 AVTransport SOAP 推送视频流
  */
 object DlnaCaster {
+
+    /** 初始化上下文（用于获取 MulticastLock），调用 scanDevices / discoverByIp 前必须调用 */
+    lateinit var appContext: Context
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -43,7 +48,12 @@ object DlnaCaster {
 
     fun scanDevices(): List<DlnaDevice> {
         val devices = mutableListOf<DlnaDevice>()
+        // 必须获取 MulticastLock，否则 Android 10+ 会丢弃 SSDP 包
+        val wifiManager = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifiManager.createMulticastLock("CyclingTV_DLNA_Scan")
+        lock.setReferenceCounted(false)
         try {
+            lock.acquire()
             val socket = MulticastSocket().apply {
                 soTimeout = SSDP_TIMEOUT_MS
             }
@@ -58,10 +68,8 @@ object DlnaCaster {
                     socket.receive(dp)
                     val response = String(dp.data, 0, dp.length)
                     val ip = dp.address.hostAddress ?: continue
-                    // 提取 LOCATION
                     val loc = Regex("LOCATION:\\s*(\\S+)", RegexOption.IGNORE_CASE)
                         .find(response)?.groupValues?.get(1) ?: continue
-                    // 获取设备描述 XML
                     val device = fetchDeviceDescription(loc, ip)
                     if (device != null && devices.none { it.ip == ip }) {
                         devices.add(device)
@@ -73,6 +81,8 @@ object DlnaCaster {
             socket.close()
         } catch (e: Exception) {
             e.printStackTrace()
+        } finally {
+            try { lock.release() } catch (_: Exception) {}
         }
         return devices
     }
@@ -120,7 +130,9 @@ object DlnaCaster {
 
     /** 根据 IP 探测 TV 的 DLNA 描述，返回设备信息 */
     fun discoverByIp(ip: String): DlnaDevice? {
-        val ports = listOf(49494, 80, 8080, 5000, 2869, 1025)
+        // Vidda/Hisense 常见端口：49494（主）、38548、49152-49154（UPnP动态）
+        // 还有 80/8080/5000/2869 等标准
+        val ports = listOf(49494, 38548, 49152, 49153, 49154, 80, 8080, 5000, 2869, 1025)
         for (port in ports) {
             val loc = "http://$ip:$port/description.xml"
             try {
