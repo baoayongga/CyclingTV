@@ -37,7 +37,8 @@ object DlnaCaster {
     data class DlnaDevice(
         val ip: String,
         val friendlyName: String,
-        val controlUrl: String
+        val controlUrl: String,
+        val supportedFormats: List<String> = emptyList()
     )
 
     fun scanDevices(): List<DlnaDevice> {
@@ -117,32 +118,32 @@ object DlnaCaster {
 
     // ─── AVTransport 投屏 ────────────────────────────────────────────────────
 
-    fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Boolean {
+    fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
         return try {
             // Step 1: SetAVTransportURI
             val setUriSoap = buildSetAVTransportURI(videoUrl, title)
             val r1 = soapPost(controlUrl, "SetAVTransportURI", setUriSoap)
-            if (!r1) return false
+            if (!r1.first) return Pair(false, r1.second)
 
             // Step 2: Play
             val playSoap = buildPlay()
             soapPost(controlUrl, "Play", playSoap)
         } catch (e: Exception) {
             e.printStackTrace()
-            false
+            Pair(false, e.message ?: "未知错误")
         }
     }
 
     fun stopCast(controlUrl: String): Boolean {
         return try {
             val stopSoap = buildStop()
-            soapPost(controlUrl, "Stop", stopSoap)
+            soapPost(controlUrl, "Stop", stopSoap).first
         } catch (e: Exception) {
             false
         }
     }
 
-    private fun soapPost(url: String, action: String, body: String): Boolean {
+    private fun soapPost(url: String, action: String, body: String): Pair<Boolean, String> {
         val req = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
@@ -150,7 +151,11 @@ object DlnaCaster {
             .post(body.toRequestBody("text/xml".toMediaType()))
             .build()
         val resp = client.newCall(req).execute()
-        return resp.isSuccessful
+        return if (resp.isSuccessful) {
+            Pair(true, "")
+        } else {
+            Pair(false, "HTTP ${resp.code}: ${resp.message}")
+        }
     }
 
     private fun buildSetAVTransportURI(uri: String, title: String) = """<?xml version="1.0"?>
