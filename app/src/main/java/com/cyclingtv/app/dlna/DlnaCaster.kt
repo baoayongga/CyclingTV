@@ -88,11 +88,15 @@ object DlnaCaster {
             val controlPath = findAvTransportControlUrl(xml)
             if (controlPath == null) return null
 
-            val base = locationUrl.substringBeforeLast("/")
-            val controlUrl = if (controlPath.startsWith("http")) controlPath
-            else "$base/$controlPath".replace("//", "/")
-                .replace("http:/", "http://")
-                .replace("https:/", "https://")
+            // 正确拼接：用 URL 的 origin (scheme+host+port) 而不是截断路径
+            val controlUrl = if (controlPath.startsWith("http")) {
+                controlPath
+            } else {
+                val uri = java.net.URI(locationUrl)
+                val origin = "${uri.scheme}://${uri.host}:${uri.port}"
+                val path = if (controlPath.startsWith("/")) controlPath else "/$controlPath"
+                "$origin$path"
+            }
 
             DlnaDevice(ip, friendlyName, controlUrl)
         } catch (e: Exception) {

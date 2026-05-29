@@ -6,20 +6,21 @@
     android:layout_height="match_parent"
     android:background="#0D0D0D">
 
+    <!-- 顶部工具栏（固定，不滚动隐藏） -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#1A1A2E">
+        android:background="#1A1A2E"
+        app:elevation="4dp">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             android:background="#1A1A2E"
-            app:title="🚴 Cycling Today"
-            app:titleTextColor="#FFFFFF"
-            app:layout_scrollFlags="scroll|enterAlways"/>
+            app:title="🚴 Cycling TV"
+            app:titleTextColor="#FFFFFF"/>
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -32,10 +33,12 @@
 
     </com.google.android.material.appbar.AppBarLayout>
 
+    <!-- WebView 区域（上方紧贴 AppBar，下方留出底部栏高度） -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_marginBottom="64dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <WebView
@@ -45,41 +48,58 @@
 
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
-    <!-- 底部工具栏 -->
+    <!-- 底部工具栏（固定在底部） -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="64dp"
         android:layout_gravity="bottom"
-        android:background="#CC1A1A2E"
+        android:background="#EE1A1A2E"
         android:orientation="horizontal"
         android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp"
         android:gravity="center_vertical">
 
+        <!-- 抓取按钮 -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFetch"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:text="🔍 抓取"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             app:backgroundTint="#E94560"
-            android:layout_marginEnd="6dp"
+            android:layout_marginEnd="4dp"
             style="@style/Widget.MaterialComponents.Button"/>
 
+        <!-- 流列表按钮 -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStreams"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="48dp"
             android:layout_weight="1"
-            android:text="📡 流列表"
+            android:text="📡"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             app:backgroundTint="#16213E"
             app:strokeColor="#E94560"
             app:strokeWidth="1dp"
+            android:layout_marginHorizontal="4dp"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"/>
+
+        <!-- 手动输入按钮 -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnManual"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="✏️ 手动"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            app:backgroundTint="#0F3460"
+            android:layout_marginStart="4dp"
+            style="@style/Widget.MaterialComponents.Button"/>
 
     </LinearLayout>
 
