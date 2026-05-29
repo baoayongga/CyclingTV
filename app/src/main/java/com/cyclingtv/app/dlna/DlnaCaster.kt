@@ -143,12 +143,45 @@ object DlnaCaster {
 
     // ─── AVTransport 投屏 ────────────────────────────────────────────────────
 
+    /**
+     * 根据 URL 检测 MIME 类型，用于 DLNA protocolInfo
+     */
+    private fun detectMimeType(url: String): String {
+        val lower = url.lowercase()
+        return when {
+            lower.contains(".m3u8") || lower.contains("m3u8") -> "video/vnd.apple.mpegurl"
+            lower.contains(".mpd") || lower.contains("mpd") -> "application/dash+xml"
+            lower.contains(".mp4") -> "video/mp4"
+            lower.contains(".ts") || lower.contains("live") || lower.contains("stream") -> "video/mp2t"
+            lower.contains(".mkv") -> "video/x-matroska"
+            lower.contains(".webm") -> "video/webm"
+            else -> "video/mpeg"
+        }
+    }
+
     fun castTo(controlUrl: String, videoUrl: String, title: String = "直播"): Pair<Boolean, String> {
         return try {
-            // Step 1: SetAVTransportURI
-            val setUriSoap = buildSetAVTransportURI(videoUrl, title)
+            val mimeType = detectMimeType(videoUrl)
+
+            // 方案 A：带完整 DIDL-Lite 元数据
+            val setUriSoap = buildSetAVTransportURI(videoUrl, title, mimeType)
             val r1 = soapPost(controlUrl, "SetAVTransportURI", setUriSoap)
-            if (!r1.first) return Pair(false, r1.second)
+            if (!r1.first) {
+                // 方案 B：如果 500，尝试不带元数据的裸 URI（部分电视简洁版 DLNA 只认这种）
+                if (r1.second.startsWith("HTTP 500")) {
+                    val rawSoap = buildSetAVTransportURIRaw(videoUrl)
+                    val r2 = soapPost(controlUrl, "SetAVTransportURI", rawSoap)
+                    if (!r2.first) {
+                        return Pair(false, "电视拒绝了该流格式（$mimeType）\n\n" +
+                            "可能原因：\n" +
+                            "1. 电视 DLNA 不支持 HLS/m3u8 直播流\n" +
+                            "2. 尝试在电视上先打开 DLNA 接收模式\n" +
+                            "3. 换一个 mp4 或 ts 格式的源试试")
+                    }
+                } else {
+                    return Pair(false, r1.second)
+                }
+            }
 
             // Step 2: Play
             val playSoap = buildPlay()
@@ -183,7 +216,7 @@ object DlnaCaster {
         }
     }
 
-    private fun buildSetAVTransportURI(uri: String, title: String) = """<?xml version="1.0"?>
+    private fun buildSetAVTransportURI(uri: String, title: String, mimeType: String) = """<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
     s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
@@ -195,10 +228,23 @@ object DlnaCaster {
           xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;
         &lt;item id="0" parentID="-1" restricted="0"&gt;
           &lt;dc:title&gt;${escapeXml(title)}&lt;/dc:title&gt;
-          &lt;res protocolInfo="http-get:*:video/mpeg:*"&gt;${escapeXml(uri)}&lt;/res&gt;
+          &lt;res protocolInfo="http-get:*:${escapeXml(mimeType)}:*" size="0" duration="0:00:00"&gt;${escapeXml(uri)}&lt;/res&gt;
           &lt;upnp:class&gt;object.item.videoItem&lt;/upnp:class&gt;
         &lt;/item&gt;
       &lt;/DIDL-Lite&gt;</CurrentURIMetaData>
+    </u:SetAVTransportURI>
+  </s:Body>
+</s:Envelope>"""
+
+    /** 裸 URI 版本（无 DIDL-Lite，部分电视简洁 DLNA 实现只认这种） */
+    private fun buildSetAVTransportURIRaw(uri: String) = """<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+    s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+      <InstanceID>0</InstanceID>
+      <CurrentURI>${escapeXml(uri)}</CurrentURI>
+      <CurrentURIMetaData></CurrentURIMetaData>
     </u:SetAVTransportURI>
   </s:Body>
 </s:Envelope>"""
