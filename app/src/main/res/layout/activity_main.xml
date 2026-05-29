@@ -1,45 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="#0D0D0D">
 
-    <!-- 顶部工具栏（固定，不滚动隐藏） -->
-    <com.google.android.material.appbar.AppBarLayout
-        android:id="@+id/appbar"
+    <!-- 顶部工具栏 -->
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="?attr/actionBarSize"
         android:background="#1A1A2E"
-        app:elevation="4dp">
+        app:title="🚴 Cycling TV"
+        app:titleTextColor="#FFFFFF"
+        android:elevation="4dp"/>
 
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="#1A1A2E"
-            app:title="🚴 Cycling TV"
-            app:titleTextColor="#FFFFFF"/>
+    <ProgressBar
+        android:id="@+id/progressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:max="100"
+        android:progressTint="#E94560"
+        android:visibility="gone"/>
 
-        <ProgressBar
-            android:id="@+id/progressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="3dp"
-            android:max="100"
-            android:progressTint="#E94560"
-            android:visibility="gone"/>
-
-    </com.google.android.material.appbar.AppBarLayout>
-
-    <!-- WebView 区域（上方紧贴 AppBar，下方留出底部栏高度） -->
+    <!-- WebView 区域（填满剩余空间） -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_marginBottom="64dp"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <WebView
             android:id="@+id/webView"
@@ -48,17 +40,17 @@
 
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
-    <!-- 底部工具栏（固定在底部） -->
+    <!-- 底部工具栏 -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="64dp"
-        android:layout_gravity="bottom"
         android:background="#EE1A1A2E"
         android:orientation="horizontal"
         android:paddingHorizontal="8dp"
         android:paddingVertical="8dp"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:elevation="8dp">
 
         <!-- 抓取按钮 -->
         <com.google.android.material.button.MaterialButton
@@ -103,4 +95,4 @@
 
     </LinearLayout>
 
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+</LinearLayout>

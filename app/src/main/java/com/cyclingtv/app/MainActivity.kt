@@ -4,15 +4,18 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
 import android.text.InputType
+import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.webkit.*
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.cyclingtv.app.databinding.ActivityMainBinding
+import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -240,20 +243,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showStreamOptions(stream: StreamInfo) {
-        AlertDialog.Builder(this)
-            .setTitle("选择操作")
-            .setMessage(stream.url.take(80))
-            .setItems(arrayOf("▶️ 本机播放", "📺 投屏到电视", "📋 复制地址")) { _, which ->
-                when (which) {
-                    0 -> openPlayer(stream.url, false)
-                    1 -> openPlayer(stream.url, true)
-                    2 -> {
-                        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("url", stream.url))
-                        Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }.show()
+        val view = LayoutInflater.from(this).inflate(com.cyclingtv.app.R.layout.dialog_stream_options, null)
+        view.findViewById<TextView>(com.cyclingtv.app.R.id.tvStreamUrl).text = "源: ${stream.source}\n${stream.url}"
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("⚡ 选择操作")
+            .setView(view)
+            .setNegativeButton("关闭", null)
+            .create()
+
+        view.findViewById<MaterialButton>(com.cyclingtv.app.R.id.btnPlay).setOnClickListener {
+            dialog.dismiss()
+            openPlayer(stream.url, false)
+        }
+        view.findViewById<MaterialButton>(com.cyclingtv.app.R.id.btnCast).setOnClickListener {
+            dialog.dismiss()
+            openPlayer(stream.url, true)
+        }
+        view.findViewById<MaterialButton>(com.cyclingtv.app.R.id.btnCopy).setOnClickListener {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("url", stream.url))
+            Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        dialog.show()
     }
 
     private fun openPlayer(url: String, castMode: Boolean) {
