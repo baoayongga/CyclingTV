@@ -91,15 +91,43 @@ class HlsProxyServer {
 
     private fun handleClient(socket: Socket, hlsUrl: String) {
         try {
-            // 解析 m3u8 → 获取 TS 片段列表
-            val (baseUrl, segments) = fetchM3u8Segments(hlsUrl)
-            val firstSegments = segments.take(5) // 预取前5个快速起播
+            val reader = socket.getInputStream().bufferedReader()
+            val requestLine = reader.readLine() ?: return
+            val isHead = requestLine.uppercase().startsWith("HEAD")
+            val isGet = requestLine.uppercase().startsWith("GET")
+
+            if (!isHead && !isGet) {
+                send405(socket)
+                return
+            }
+
+            // 消耗完请求头
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isEmpty()) break
+            }
 
             val out = socket.getOutputStream()
 
-            // HTTP 响应头
+            if (isHead) {
+                val header = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: video/vnd.dlna.mpeg-tts\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(header.toByteArray())
+                out.close()
+                return
+            }
+
+            // GET：解析 m3u8 → 获取 TS 片段列表
+            val (baseUrl, segments) = fetchM3u8Segments(hlsUrl)
+            val firstSegments = segments.take(5)
+
+            // HTTP 响应头 — Vidda/Hisense 认 video/vnd.dlna.mpeg-tts
             val header = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: video/mp2t\r\n" +
+                    "Content-Type: video/vnd.dlna.mpeg-tts\r\n" +
+                    "Transfer-Encoding: chunked\r\n" +
+                    "Accept-Ranges: bytes\r\n" +
                     "Connection: close\r\n" +
                     "Cache-Control: no-cache\r\n\r\n"
             out.write(header.toByteArray())
@@ -109,11 +137,10 @@ class HlsProxyServer {
                 if (!running) break
                 val data = downloadSegment(segUrl) ?: continue
                 seenSegments.add(segUrl)
-                out.write(data)
-                out.flush()
+                writeChunked(out, data)
             }
 
-            // 持续拉取新片段（直播流场景）
+            // 持续拉取新片段
             var lastRefresh = System.currentTimeMillis()
             while (running) {
                 val elapsed = System.currentTimeMillis() - lastRefresh
@@ -129,23 +156,36 @@ class HlsProxyServer {
                     if (seenSegments.contains(segUrl)) continue
                     val data = downloadSegment(segUrl) ?: continue
                     seenSegments.add(segUrl)
-                    out.write(data)
+                    writeChunked(out, data)
                     wrote = true
                 }
                 out.flush()
 
-                // 如果连续两次都没新片段且没有 EXT-X-ENDLIST，可能是直播间隙，继续等待
                 if (!wrote && newSegments.isEmpty()) {
-                    // 可能流已结束，给 TV 几秒缓冲后断开
                     Thread.sleep(3000)
                     break
                 }
             }
+            writeChunked(out, byteArrayOf()) // 结束 chunk
             out.close()
         } catch (_: Exception) {
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
+    }
+
+    private fun writeChunked(out: OutputStream, data: ByteArray) {
+        val hexLen = data.size.toString(16)
+        out.write("$hexLen\r\n".toByteArray())
+        if (data.isNotEmpty()) out.write(data)
+        out.write("\r\n".toByteArray())
+    }
+
+    private fun send405(socket: Socket) {
+        try {
+            val resp = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n"
+            socket.getOutputStream().write(resp.toByteArray())
+        } catch (_: Exception) {}
     }
 
     // ─── m3u8 解析 ────────────────────────────────────────────────────────────

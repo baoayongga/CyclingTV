@@ -152,10 +152,10 @@ object DlnaCaster {
             lower.contains(".m3u8") || lower.contains("m3u8") -> "video/vnd.apple.mpegurl"
             lower.contains(".mpd") || lower.contains("mpd") -> "application/dash+xml"
             lower.contains(".mp4") -> "video/mp4"
-            lower.contains(".ts") || lower.contains("live") || lower.contains("stream") -> "video/mp2t"
+            lower.contains(".ts") || lower.contains("live") || lower.contains("stream") -> "video/vnd.dlna.mpeg-tts"
             lower.contains(".mkv") -> "video/x-matroska"
             lower.contains(".webm") -> "video/webm"
-            else -> "video/mpeg"
+            else -> "video/vnd.dlna.mpeg-tts"
         }
     }
 
@@ -194,30 +194,43 @@ object DlnaCaster {
         }
     }
 
-    /** 核心投屏逻辑（方案 A → 方案 B） */
+    /** 核心投屏逻辑（多 MIME 依次尝试） */
     private fun tryCast(controlUrl: String, videoUrl: String, title: String): Pair<Boolean, String> {
         return try {
-            val mimeType = detectMimeType(videoUrl)
+            val isTsProxy = videoUrl.contains(":9876") || videoUrl.contains(":8765") || videoUrl.contains(":8088")
+            val mimeCandidates = if (isTsProxy) {
+                listOf("video/vnd.dlna.mpeg-tts", "video/mp2t", "video/mpeg")
+            } else {
+                listOf(detectMimeType(videoUrl))
+            }
 
-            // 方案 A：带完整 DIDL-Lite 元数据
-            val setUriSoap = buildSetAVTransportURI(videoUrl, title, mimeType)
-            val r1 = soapPost(controlUrl, "SetAVTransportURI", setUriSoap)
-            if (!r1.first) {
-                // 方案 B：不带元数据的裸 URI（部分电视简洁版 DLNA 只认这种）
+            var lastError = ""
+            for (mimeType in mimeCandidates) {
+                // 方案 A：带完整 DIDL-Lite 元数据
+                val setUriSoap = buildSetAVTransportURI(videoUrl, title, mimeType)
+                val r1 = soapPost(controlUrl, "SetAVTransportURI", setUriSoap)
+                if (r1.first) {
+                    // MIME 匹配成功 → Play
+                    val playSoap = buildPlay()
+                    return soapPost(controlUrl, "Play", playSoap)
+                }
+
+                lastError = r1.second
+
+                // 方案 B：不带元数据的裸 URI
                 if (r1.second.startsWith("HTTP 500")) {
                     val rawSoap = buildSetAVTransportURIRaw(videoUrl)
                     val r2 = soapPost(controlUrl, "SetAVTransportURI", rawSoap)
-                    if (!r2.first) {
-                        return Pair(false, "电视拒绝了该流格式（$mimeType）")
+                    if (r2.first) {
+                        val playSoap = buildPlay()
+                        return soapPost(controlUrl, "Play", playSoap)
                     }
-                } else {
-                    return Pair(false, r1.second)
+                    lastError = r2.second
                 }
             }
 
-            // Step 2: Play
-            val playSoap = buildPlay()
-            soapPost(controlUrl, "Play", playSoap)
+            // 所有 MIME 都失败
+            Pair(false, "电视拒绝了该流格式（尝试: ${mimeCandidates.joinToString(", ")}）")
         } catch (e: Exception) {
             e.printStackTrace()
             Pair(false, e.message ?: "未知错误")
