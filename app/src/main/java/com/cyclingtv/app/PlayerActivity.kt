@@ -12,6 +12,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.cyclingtv.app.databinding.ActivityPlayerBinding
@@ -63,7 +64,19 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun initExoPlayer() {
-        exoPlayer = ExoPlayer.Builder(this).build().also { player ->
+        // 大缓冲区：解决直播流 25 秒卡顿
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs   */ 30_000,   // 最少缓冲 30 秒
+                /* maxBufferMs   */ 120_000,  // 最多缓冲 120 秒
+                /* playbackMs    */ 5_000,    // 起播需要 5 秒缓冲
+                /* rebufferMs    */ 10_000    // 卡顿恢复需要 10 秒
+            )
+            .build()
+
+        exoPlayer = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .build().also { player ->
             binding.playerView.player = player
             player.setMediaItem(MediaItem.fromUri(streamUrl))
             player.prepare()

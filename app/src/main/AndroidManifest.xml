@@ -37,6 +37,7 @@
             android:name=".PlayerActivity"
             android:exported="false"
             android:screenOrientation="landscape"
+            android:theme="@style/Theme.CyclingTV.Player"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <!-- DLNA 后台服务 -->
