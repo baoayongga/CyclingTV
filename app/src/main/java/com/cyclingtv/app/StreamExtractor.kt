@@ -8,10 +8,15 @@ import java.util.regex.Pattern
 /**
  * 直播流提取引擎
  *
- * 源优先级：
+ * 抓取策略：依次抓取所有源，有比赛时自动提取 m3u8/mpd/rtmp
+ * 无比赛时各站页面无播放器，返回空列表，用户可手动输入地址
+ *
+ * 源列表：
  * 1. cyclingstream.com   — 嵌入播放器，有 m3u8
  * 2. tiz-cycling.tv      — 有直播/回放
- * 3. 手动粘贴            — 用户自己输入 m3u8/rtmp 地址
+ * 3. cyclingtiz.live     — Tiz 志愿者站
+ * 4. cycling.today       — TagDiv 嵌入播放器（有比赛才有）
+ * 5. inthebunch.co.za    — 嵌入 YouTube/Vimeo 流
  */
 object StreamExtractor {
 
@@ -45,17 +50,27 @@ object StreamExtractor {
         SourceInfo(
             "cyclingstream.com",
             "https://cyclingstream.com/live-stream-2/",
-            "专业自行车赛直播站"
+            "专业自行车赛直播站（嵌入播放器）"
         ),
         SourceInfo(
             "tiz-cycling.tv",
             "https://tiz-cycling.tv/main/",
-            "经典赛事直播+回放"
+            "经典赛事直播 + 回放"
         ),
         SourceInfo(
             "cyclingtiz.live",
             "https://cyclingtiz.live/",
             "Tiz 志愿者直播站"
+        ),
+        SourceInfo(
+            "cycling.today",
+            "https://cycling.today/live-stream-2/",
+            "TagDiv 主题站（有比赛时嵌入播放器）"
+        ),
+        SourceInfo(
+            "inthebunch.co.za",
+            "https://inthebunch.co.za/live-streaming/",
+            "嵌入 YouTube/Vimeo 流"
         )
     )
 

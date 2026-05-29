@@ -284,6 +284,7 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 2, 1, "tiz-cycling.tv")
         menu.add(0, 3, 2, "cyclingtiz.live")
         menu.add(0, 4, 3, "cycling.today")
+        menu.add(0, 5, 4, "inthebunch.co.za")
         return true
     }
 
@@ -292,7 +293,8 @@ class MainActivity : AppCompatActivity() {
             1 -> "https://cyclingstream.com/live-stream-2/"
             2 -> "https://tiz-cycling.tv/main/"
             3 -> "https://cyclingtiz.live/"
-            4 -> "https://cycling.today/"
+            4 -> "https://cycling.today/live-stream-2/"
+            5 -> "https://inthebunch.co.za/live-streaming/"
             else -> return super.onOptionsItemSelected(item)
         }
         webViewStreams.clear()
